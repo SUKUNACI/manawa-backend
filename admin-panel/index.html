@@ -1,0 +1,1871 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTP Connect — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --orange:#F4720B; --orange-light:#FF9B45; --gold:#E8B84B;
+  --dark:#0E1117; --dark2:#181C26; --dark3:#1F2433; --dark4:#252B3B;
+  --green:#22C55E; --green-dim:rgba(34,197,94,0.12);
+  --red:#EF4444; --red-dim:rgba(239,68,68,0.12);
+  --blue:#3B82F6; --blue-dim:rgba(59,130,246,0.12);
+  --yellow:#F59E0B; --yellow-dim:rgba(245,158,11,0.12);
+  --white:#FFF; --muted:#9CA3AF; --light:#D1D5DB;
+  --border:rgba(255,255,255,0.09); --card:rgba(255,255,255,0.04);
+  --sidebar-w:240px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--white);display:flex;min-height:100vh;overflow-x:hidden;}
+
+/* ── SIDEBAR ── */
+.sidebar{width:var(--sidebar-w);background:var(--dark2);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;overflow-y:auto;}
+.sidebar-logo{padding:24px 20px;border-bottom:1px solid var(--border);}
+.sidebar-logo h1{font-family:'Syne',sans-serif;font-size:20px;font-weight:800;color:var(--white);}
+.sidebar-logo h1 span{color:var(--orange);}
+.sidebar-logo p{font-size:11px;color:var(--muted);margin-top:3px;letter-spacing:1px;}
+.sidebar-badge{display:inline-block;background:rgba(244,114,11,0.15);color:var(--orange);font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-top:6px;letter-spacing:1px;}
+.nav-section{padding:20px 12px 8px;font-size:10px;color:var(--muted);letter-spacing:2px;font-weight:600;text-transform:uppercase;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;cursor:pointer;transition:all .2s;margin:2px 8px;color:var(--muted);font-size:14px;font-weight:500;position:relative;}
+.nav-item:hover{background:var(--card);color:var(--light);}
+.nav-item.active{background:rgba(244,114,11,0.12);color:var(--orange);}
+.nav-item .ni{font-size:18px;width:22px;text-align:center;}
+.nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;min-width:20px;text-align:center;}
+.nav-badge.orange{background:var(--orange);}
+.sidebar-footer{margin-top:auto;padding:16px;border-top:1px solid var(--border);}
+.admin-chip{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--dark3);border-radius:12px;}
+.admin-chip .av{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,var(--orange),var(--gold));display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
+.admin-chip .ai h4{font-size:12px;font-weight:600;color:var(--white);}
+.admin-chip .ai p{font-size:10px;color:var(--muted);}
+.btn-logout{width:100%;margin-top:10px;padding:10px;border-radius:10px;background:var(--red-dim);color:var(--red);border:1px solid rgba(239,68,68,0.25);font-size:12px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;transition:all .2s;}
+.btn-logout:hover{background:var(--red);color:#fff;}
+
+/* ── MAIN ── */
+.main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-height:100vh;}
+.topbar{background:var(--dark2);border-bottom:1px solid var(--border);padding:0 28px;height:60px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+.topbar-title{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--white);}
+.topbar-actions{display:flex;gap:10px;align-items:center;}
+.topbar-btn{padding:8px 16px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:none;font-family:'DM Sans',sans-serif;transition:all .2s;}
+.topbar-btn.primary{background:var(--orange);color:#fff;}
+.topbar-btn.secondary{background:var(--card);border:1px solid var(--border);color:var(--light);}
+.content{padding:28px;flex:1;}
+
+/* ── PAGES ── */
+.page{display:none;}
+.page.active{display:block;}
+
+/* ── KPI GRID ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px;}
+.kpi{background:var(--dark3);border:1px solid var(--border);border-radius:20px;padding:20px;position:relative;overflow:hidden;}
+.kpi::before{content:'';position:absolute;top:-20px;right:-20px;width:80px;height:80px;border-radius:50%;opacity:.08;}
+.kpi.orange::before{background:var(--orange);}
+.kpi.green::before{background:var(--green);}
+.kpi.blue::before{background:var(--blue);}
+.kpi.red::before{background:var(--red);}
+.kpi-icon{font-size:24px;margin-bottom:12px;}
+.kpi-val{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--white);margin-bottom:4px;}
+.kpi-label{font-size:12px;color:var(--muted);}
+.kpi-delta{font-size:11px;font-weight:600;margin-top:6px;}
+.kpi-delta.up{color:var(--green);}
+.kpi-delta.warn{color:var(--yellow);}
+
+/* ── SECTION HEADER ── */
+.section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
+.section-header h2{font-family:'Syne',sans-serif;font-size:17px;font-weight:700;color:var(--white);}
+.section-header .sh-actions{display:flex;gap:8px;align-items:center;}
+
+/* ── TABLE ── */
+.table-wrap{background:var(--dark3);border:1px solid var(--border);border-radius:20px;overflow:hidden;margin-bottom:24px;}
+table{width:100%;border-collapse:collapse;}
+thead tr{background:rgba(255,255,255,0.03);border-bottom:1px solid var(--border);}
+thead th{padding:12px 16px;text-align:left;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:1px;text-transform:uppercase;white-space:nowrap;}
+tbody tr{border-bottom:1px solid var(--border);transition:background .15s;}
+tbody tr:last-child{border-bottom:none;}
+tbody tr:hover{background:rgba(255,255,255,0.02);}
+td{padding:12px 16px;font-size:13px;color:var(--light);}
+td strong{color:var(--white);font-weight:600;}
+td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
+
+/* ── BADGES ── */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;}
+.badge-green{background:var(--green-dim);color:var(--green);}
+.badge-orange{background:rgba(244,114,11,0.15);color:var(--orange-light);}
+.badge-red{background:var(--red-dim);color:var(--red);}
+.badge-blue{background:var(--blue-dim);color:var(--blue);}
+.badge-yellow{background:var(--yellow-dim);color:var(--yellow);}
+.badge-muted{background:rgba(255,255,255,0.06);color:var(--muted);}
+
+/* ── BUTTONS ── */
+.btn{padding:7px 14px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;border:none;font-family:'DM Sans',sans-serif;transition:all .2s;}
+.btn-approve{background:var(--green-dim);color:var(--green);border:1px solid rgba(34,197,94,0.25);}
+.btn-approve:hover{background:var(--green);color:#fff;}
+.btn-reject{background:var(--red-dim);color:var(--red);border:1px solid rgba(239,68,68,0.25);}
+.btn-reject:hover{background:var(--red);color:#fff;}
+.btn-view{background:var(--card);color:var(--muted);border:1px solid var(--border);}
+.btn-view:hover{color:var(--white);}
+.btn-premium{background:rgba(232,184,75,0.12);color:var(--gold);border:1px solid rgba(232,184,75,0.25);}
+
+/* ── SEARCH / FILTERS ── */
+.filters{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+.filter-input{background:var(--dark3);border:1.5px solid var(--border);border-radius:12px;padding:9px 14px;font-size:13px;color:var(--white);font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s;min-width:220px;}
+.filter-input::placeholder{color:var(--muted);}
+.filter-input:focus{border-color:var(--orange);}
+.filter-select{background:var(--dark3);border:1.5px solid var(--border);border-radius:12px;padding:9px 14px;font-size:13px;color:var(--white);font-family:'DM Sans',sans-serif;outline:none;cursor:pointer;}
+
+/* ── VERIFICATION CARDS ── */
+.verif-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;margin-bottom:24px;}
+.verif-card{background:var(--dark3);border:1px solid var(--border);border-radius:20px;padding:20px;}
+.vc-header{display:flex;gap:12px;align-items:flex-start;margin-bottom:16px;}
+.vc-avatar{width:48px;height:48px;border-radius:15px;background:rgba(244,114,11,0.12);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;}
+.vc-info h3{font-size:15px;font-weight:600;color:var(--white);margin-bottom:2px;}
+.vc-info p{font-size:12px;color:var(--muted);}
+.vc-docs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;}
+.vc-doc{background:var(--dark4);border:1px solid var(--border);border-radius:12px;aspect-ratio:4/3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;transition:all .2s;font-size:24px;overflow:hidden;}
+.vc-doc:hover{border-color:var(--orange);}
+.vc-doc span{font-size:10px;color:var(--muted);}
+.vc-doc img{width:100%;height:100%;object-fit:cover;border-radius:11px;}
+.vc-actions{display:flex;gap:8px;}
+.vc-actions .btn{flex:1;padding:10px;font-size:13px;}
+.vc-info .vc-date{font-size:10px;color:rgba(156,163,175,0.5);margin-top:4px;}
+.vc-score-bar{height:4px;background:rgba(255,255,255,0.06);border-radius:2px;margin-bottom:14px;overflow:hidden;}
+.vc-score-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--orange),var(--gold));}
+
+/* ── CHARTS (CSS-only) ── */
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;}
+.chart-card{background:var(--dark3);border:1px solid var(--border);border-radius:20px;padding:20px;}
+.chart-card h3{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:var(--white);margin-bottom:16px;}
+.bar-chart{display:flex;align-items:flex-end;gap:8px;height:100px;}
+.bar-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;}
+.bar{width:100%;border-radius:6px 6px 0 0;background:linear-gradient(180deg,var(--orange),rgba(244,114,11,0.4));transition:height .5s ease;}
+.bar-label{font-size:10px;color:var(--muted);}
+.bar-val{font-size:10px;color:var(--orange);font-weight:600;}
+.donut-wrap{display:flex;align-items:center;gap:20px;}
+.donut{width:80px;height:80px;border-radius:50%;background:conic-gradient(var(--orange) 0% 62%,var(--blue) 62% 80%,var(--green) 80% 100%);position:relative;flex-shrink:0;}
+.donut::after{content:'';position:absolute;inset:16px;background:var(--dark3);border-radius:50%;}
+.donut-legend{display:flex;flex-direction:column;gap:8px;}
+.dl-item{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);}
+.dl-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+
+/* ── ALERT BOX ── */
+.alert{padding:14px 16px;border-radius:14px;margin-bottom:16px;display:flex;align-items:flex-start;gap:10px;font-size:13px;}
+.alert-warn{background:var(--yellow-dim);border:1px solid rgba(245,158,11,0.25);color:var(--yellow);}
+.alert-info{background:var(--blue-dim);border:1px solid rgba(59,130,246,0.2);color:var(--blue);}
+
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:500;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .3s;}
+.modal-overlay.show{opacity:1;pointer-events:all;}
+.modal{background:var(--dark2);border:1px solid var(--border);border-radius:24px;padding:28px;width:480px;max-width:90vw;transform:scale(0.95);transition:transform .3s;}
+.modal-overlay.show .modal{transform:scale(1);}
+.modal h2{font-family:'Syne',sans-serif;font-size:20px;font-weight:800;color:var(--white);margin-bottom:8px;}
+.modal p{font-size:14px;color:var(--muted);line-height:1.6;margin-bottom:20px;}
+.modal-actions{display:flex;gap:10px;margin-top:20px;}
+.modal-actions .btn{flex:1;padding:13px;font-size:14px;}
+
+/* ── TOAST ── */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--dark3);border:1px solid rgba(34,197,94,0.3);border-radius:14px;padding:14px 18px;display:flex;align-items:center;gap:10px;z-index:1000;transform:translateY(20px);opacity:0;transition:all .4s ease;pointer-events:none;min-width:280px;}
+.toast.show{transform:translateY(0);opacity:1;}
+.toast p{font-size:13px;color:var(--light);}
+
+/* ── LOGIN ── */
+.login-overlay{position:fixed;inset:0;background:var(--dark);z-index:9999;display:flex;align-items:center;justify-content:center;}
+.login-overlay.hidden{display:none;}
+.login-box{background:var(--dark2);border:1px solid var(--border);border-radius:24px;padding:40px;width:400px;max-width:90vw;}
+.login-box h1{font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--white);margin-bottom:4px;}
+.login-box h1 span{color:var(--orange);}
+.login-box .login-sub{font-size:13px;color:var(--muted);margin-bottom:28px;}
+.login-box label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;letter-spacing:0.5px;}
+.login-box input{width:100%;background:var(--dark3);border:1.5px solid var(--border);border-radius:12px;padding:12px 14px;font-size:14px;color:var(--white);font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s;margin-bottom:16px;}
+.login-box input:focus{border-color:var(--orange);}
+.login-box .login-btn{width:100%;padding:14px;border-radius:12px;background:var(--orange);color:#fff;font-size:14px;font-weight:700;font-family:'DM Sans',sans-serif;border:none;cursor:pointer;transition:all .2s;margin-top:8px;}
+.login-box .login-btn:hover{background:var(--orange-light);}
+.login-box .login-btn:disabled{opacity:0.5;cursor:not-allowed;}
+.login-error{background:var(--red-dim);border:1px solid rgba(239,68,68,0.25);color:var(--red);padding:10px 14px;border-radius:10px;font-size:12px;margin-bottom:16px;display:none;}
+
+/* ── PAGINATION ── */
+.pagination{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:16px;}
+.pagination .btn{min-width:100px;}
+.pagination .page-info{font-size:12px;color:var(--muted);}
+
+/* ── EMPTY STATE ── */
+.empty-state{text-align:center;padding:48px 20px;color:var(--muted);}
+.empty-state .es-icon{font-size:48px;margin-bottom:12px;}
+.empty-state p{font-size:14px;}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--dark4);border-radius:4px;}
+
+/* ── LOADING ── */
+.loading-spinner{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--muted);font-size:14px;gap:10px;}
+.loading-spinner::before{content:'';width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<!-- ══ LOGIN SCREEN ══ -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-box">
+    <h1>BTP<span>Connect</span></h1>
+    <p class="login-sub">BACK-OFFICE ADMIN</p>
+    <div class="login-error" id="login-error"></div>
+    <label>Email</label>
+    <input type="email" id="login-email" placeholder="admin@btpconnect.ci">
+    <label>Mot de passe</label>
+    <input type="password" id="login-password" placeholder="Votre mot de passe">
+    <button class="login-btn" id="login-btn" onclick="doLogin()">Se connecter</button>
+  </div>
+</div>
+
+<!-- ══ SIDEBAR ══ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h1>BTP<span>Connect</span></h1>
+    <p>BACK-OFFICE</p>
+    <span class="sidebar-badge">ADMIN</span>
+  </div>
+
+  <div class="nav-section">Principal</div>
+  <div class="nav-item active" onclick="showPage('dashboard',this)"><span class="ni">📊</span> Tableau de bord</div>
+  <div class="nav-item" onclick="showPage('verif-id',this)">
+    <span class="ni">🪪</span> Vérifications ID
+    <span class="nav-badge" id="badge-id" style="display:none;">0</span>
+  </div>
+
+  <div class="nav-section">Gestion</div>
+  <div class="nav-item" onclick="showPage('professionals',this)"><span class="ni">🔨</span> Professionnels</div>
+  <div class="nav-item" onclick="showPage('clients',this)"><span class="ni">👥</span> Clients</div>
+  <div class="nav-item" onclick="showPage('projects',this)"><span class="ni">📋</span> Projets</div>
+  <div class="nav-item" onclick="showPage('payments',this)"><span class="ni">💰</span> Paiements</div>
+  <div class="nav-item" onclick="showPage('support',this)">
+    <span class="ni">🎧</span> Support
+    <span class="nav-badge orange" id="badge-support" style="display:none;">0</span>
+  </div>
+  <div class="nav-item" onclick="showPage('deleted',this)"><span class="ni">🗄️</span> Corbeille</div>
+
+  <div class="sidebar-footer">
+    <div class="admin-chip">
+      <div class="av">👤</div>
+      <div class="ai"><h4 id="admin-name">Super Admin</h4><p id="admin-email">admin@btpconnect.ci</p></div>
+    </div>
+    <button class="btn-logout" onclick="logout()">🚪 Se déconnecter</button>
+  </div>
+</aside>
+
+<!-- ══ MAIN ══ -->
+<main class="main">
+  <div class="topbar">
+    <span class="topbar-title" id="page-title">Tableau de bord</span>
+    <div class="topbar-actions">
+      <button class="topbar-btn secondary" onclick="refreshCurrentPage()">↺ Actualiser</button>
+      <button class="topbar-btn primary" id="topbar-pending-btn" onclick="showPage('verif-id',null)" style="display:none;">⚠️ <span id="topbar-pending-count">0</span> en attente</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ══ PAGE: DASHBOARD ══ -->
+    <div class="page active" id="page-dashboard">
+      <div class="kpi-grid" id="dashboard-kpis">
+        <div class="kpi orange">
+          <div class="kpi-icon">👷</div>
+          <div class="kpi-val" id="kpi-pros">--</div>
+          <div class="kpi-label">Professionnels inscrits</div>
+        </div>
+        <div class="kpi green">
+          <div class="kpi-icon">👥</div>
+          <div class="kpi-val" id="kpi-clients">--</div>
+          <div class="kpi-label">Clients actifs</div>
+        </div>
+        <div class="kpi blue">
+          <div class="kpi-icon">📋</div>
+          <div class="kpi-val" id="kpi-projects">--</div>
+          <div class="kpi-label">Projets publiés</div>
+          <div class="kpi-delta up" id="kpi-projects-delta"></div>
+        </div>
+        <div class="kpi red">
+          <div class="kpi-icon">💰</div>
+          <div class="kpi-val" id="kpi-revenue">--</div>
+          <div class="kpi-label">FCFA encaissés</div>
+        </div>
+      </div>
+
+      <div class="alert alert-warn" id="dashboard-alert" style="display:none;">
+        ⚠️ <span id="dashboard-alert-text"></span>
+      </div>
+
+      <div class="chart-row">
+        <div class="chart-card">
+          <h3>📈 Statistiques projets</h3>
+          <div class="bar-chart" id="dashboard-projects-chart"></div>
+        </div>
+        <div class="chart-card">
+          <h3>🥧 Répartition utilisateurs</h3>
+          <div class="donut-wrap" id="dashboard-donut">
+            <div class="donut" id="dashboard-donut-chart"></div>
+            <div class="donut-legend" id="dashboard-donut-legend"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-header">
+        <h2>🕐 Dernières inscriptions</h2>
+        <div class="sh-actions">
+          <button class="btn btn-view" onclick="showPage('professionals',null)">Voir tout →</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Nom</th><th>Role</th><th>Ville</th><th>Date</th>
+          </tr></thead>
+          <tbody id="dashboard-latest-users"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: VERIFICATIONS IDENTITE ══ -->
+    <div class="page" id="page-verif-id">
+      <div class="alert alert-info">🪪 Ces professionnels ont soumis leur pièce d'identité + selfie. Vérifiez que le visage correspond et que le document est valide avant d'approuver.</div>
+      <div class="verif-grid" id="verif-grid"></div>
+      <div class="empty-state" id="verif-empty" style="display:none;">
+        <div class="es-icon">✅</div>
+        <p>Aucune vérification en attente</p>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: PROFESSIONNELS ══ -->
+    <div class="page" id="page-professionals">
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Rechercher un professionnel..." id="pros-search" oninput="debouncePros()">
+        <select class="filter-select" id="pros-trade-filter" onchange="loadProfessionals(1)">
+          <option value="">Tous les métiers</option>
+          <option value="Maçon">Maçon</option>
+          <option value="Electricien">Electricien</option>
+          <option value="Plombier">Plombier</option>
+          <option value="Peintre">Peintre</option>
+          <option value="Carreleur">Carreleur</option>
+          <option value="Menuisier">Menuisier</option>
+        </select>
+        <select class="filter-select" id="pros-status-filter" onchange="loadProfessionals(1)">
+          <option value="">Tous les statuts</option>
+          <option value="APPROVED">Vérifié</option>
+          <option value="PENDING">En attente</option>
+          <option value="REJECTED">Rejeté</option>
+          <option value="NOT_SUBMITTED">Non soumis</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table id="pros-table">
+          <thead><tr><th>ID</th><th>Professionnel</th><th>Métier</th><th>Ville</th><th>Note</th><th>Missions</th><th>Statut ID</th><th>Premium</th><th>Actions</th></tr></thead>
+          <tbody id="pros-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="pros-empty" style="display:none;">
+        <div class="es-icon">🔨</div>
+        <p>Aucun professionnel trouvé</p>
+      </div>
+      <div class="pagination" id="pros-pagination" style="display:none;">
+        <button class="btn btn-view" id="pros-prev" onclick="loadProfessionals(prosCurrentPage-1)">← Précédent</button>
+        <span class="page-info" id="pros-page-info"></span>
+        <button class="btn btn-view" id="pros-next" onclick="loadProfessionals(prosCurrentPage+1)">Suivant →</button>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: CLIENTS ══ -->
+    <div class="page" id="page-clients">
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Rechercher un client..." id="clients-search" oninput="debounceClients()">
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Client</th><th>Ville</th><th>Statut</th><th>Inscription</th><th>Actions</th></tr></thead>
+          <tbody id="clients-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="clients-empty" style="display:none;">
+        <div class="es-icon">👥</div>
+        <p>Aucun client trouvé</p>
+      </div>
+      <div class="pagination" id="clients-pagination" style="display:none;">
+        <button class="btn btn-view" id="clients-prev" onclick="loadClients(clientsCurrentPage-1)">← Précédent</button>
+        <span class="page-info" id="clients-page-info"></span>
+        <button class="btn btn-view" id="clients-next" onclick="loadClients(clientsCurrentPage+1)">Suivant →</button>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: PROJETS ══ -->
+    <div class="page" id="page-projects">
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;" id="projects-kpis">
+        <div class="kpi green"><div class="kpi-icon">📂</div><div class="kpi-val" id="proj-open">--</div><div class="kpi-label">Projets ouverts</div></div>
+        <div class="kpi blue"><div class="kpi-icon">▶</div><div class="kpi-val" id="proj-progress">--</div><div class="kpi-label">En cours</div></div>
+        <div class="kpi orange"><div class="kpi-icon">✓</div><div class="kpi-val" id="proj-completed">--</div><div class="kpi-label">Terminés</div></div>
+        <div class="kpi red"><div class="kpi-icon">✕</div><div class="kpi-val" id="proj-cancelled">--</div><div class="kpi-label">Annulés</div></div>
+      </div>
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Rechercher un projet…" id="proj-search" oninput="loadProjects(1)">
+        <select class="filter-select" id="proj-status-filter" onchange="loadProjects(1)">
+          <option value="">Tous les statuts</option>
+          <option value="OPEN">Ouvert</option>
+          <option value="IN_PROGRESS">En cours</option>
+          <option value="COMPLETED">Terminé</option>
+          <option value="CANCELLED">Annulé</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Projet</th><th>Client</th><th>Métier</th><th>Ville</th><th>Budget</th><th>Devis</th><th>Statut</th><th>Date</th><th>Actions</th></tr></thead>
+          <tbody id="projects-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="projects-empty" style="display:none;">
+        <div class="es-icon">📋</div>
+        <p>Aucun projet trouvé</p>
+      </div>
+      <div style="display:flex;justify-content:center;gap:10px;margin-top:16px;" id="projects-pagination"></div>
+    </div>
+
+    <!-- ══ MODAL: DÉTAIL PROJET ══ -->
+    <div class="modal-overlay" id="modal-project">
+      <div class="modal" style="width:600px;max-height:85vh;overflow-y:auto;">
+        <h2 id="mp-title">Détail du projet</h2>
+        <div id="mp-content" style="margin-top:16px;"></div>
+        <div class="modal-actions" style="margin-top:20px;">
+          <button class="btn btn-view" onclick="closeModal('modal-project')">Fermer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: PAIEMENTS ══ -->
+    <div class="page" id="page-payments">
+      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;" id="payments-kpis">
+        <div class="kpi green"><div class="kpi-icon">✅</div><div class="kpi-val" id="pay-revenue">--</div><div class="kpi-label">FCFA encaissés (total)</div></div>
+        <div class="kpi blue"><div class="kpi-icon">📊</div><div class="kpi-val" id="pay-count">--</div><div class="kpi-label">Transactions réussies</div></div>
+        <div class="kpi red"><div class="kpi-icon">✕</div><div class="kpi-val" id="pay-failed">--</div><div class="kpi-label">Paiements échoués</div></div>
+      </div>
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Rechercher un paiement…" id="pay-search" oninput="loadPayments(1)">
+        <select class="filter-select" id="pay-status-filter" onchange="loadPayments(1)">
+          <option value="">Tous les statuts</option>
+          <option value="succeeded">Succès</option>
+          <option value="pending">En attente</option>
+          <option value="failed">Échoué</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Montant</th><th>Statut</th><th>Professionnel</th><th>Projet</th><th>Date</th></tr></thead>
+          <tbody id="payments-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="payments-empty" style="display:none;">
+        <div class="es-icon">💰</div>
+        <p>Aucun paiement trouvé</p>
+      </div>
+      <div class="pagination" id="payments-pagination" style="display:none;">
+        <button class="btn btn-view" id="pay-prev" onclick="loadPayments(payCurrentPage-1)">← Précédent</button>
+        <span class="page-info" id="pay-page-info"></span>
+        <button class="btn btn-view" id="pay-next" onclick="loadPayments(payCurrentPage+1)">Suivant →</button>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: SUPPORT ══ -->
+    <div class="page" id="page-support">
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Rechercher par ID ticket, nom, email..." id="support-search" oninput="debounceSupportSearch()">
+        <select class="filter-select" id="support-status-filter" onchange="loadSupportTickets()">
+          <option value="">Tous les statuts</option>
+          <option value="OPEN">Ouvert</option>
+          <option value="IN_PROGRESS">En cours</option>
+          <option value="RESOLVED">Résolu</option>
+          <option value="CLOSED">Fermé</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>N° Ticket</th><th>Utilisateur</th><th>Catégorie</th><th>Sujet</th><th>Statut</th><th>Dernier message</th><th>Date</th><th>Actions</th></tr></thead>
+          <tbody id="support-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="support-empty" style="display:none;">
+        <div class="es-icon">🎧</div>
+        <p>Aucun ticket de support</p>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: COMPTES SUPPRIMÉS ══ -->
+    <div class="page" id="page-deleted">
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Rechercher par ID, nom, email..." id="deleted-search" oninput="loadDeletedUsers(1)">
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Nom</th><th>Email</th><th>Rôle</th><th>Ville</th><th>Supprimé le</th><th>Créé le</th><th>Actions</th></tr></thead>
+          <tbody id="deleted-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="deleted-empty" style="display:none;">
+        <div class="es-icon">🗄️</div>
+        <p>Aucun compte supprimé</p>
+      </div>
+      <div id="deleted-pagination"></div>
+    </div>
+
+    <!-- ══ MODAL: SUPPORT TICKET DETAIL ══ -->
+    <div class="modal-overlay" id="modal-support">
+      <div class="modal" style="width:600px;max-height:85vh;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <h2 id="support-modal-title">Ticket</h2>
+          <select class="filter-select" id="support-modal-status" onchange="changeSupportStatus()" style="width:auto;"></select>
+        </div>
+        <div id="support-modal-messages" style="margin-bottom:16px;max-height:400px;overflow-y:auto;"></div>
+        <div style="display:flex;gap:8px;">
+          <textarea id="support-reply-input" style="flex:1;background:var(--dark3);border:1.5px solid var(--border);border-radius:12px;padding:12px;font-size:13px;color:var(--white);font-family:'DM Sans',sans-serif;outline:none;resize:none;height:60px;" placeholder="Répondre au ticket..."></textarea>
+          <button class="btn btn-approve" onclick="sendSupportReply()" style="align-self:flex-end;padding:14px 20px;">Envoyer</button>
+        </div>
+        <div class="modal-actions" style="margin-top:16px;">
+          <button class="btn btn-view" onclick="closeModal('modal-support')">Fermer</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</main>
+
+<!-- ══ MODAL: DOCUMENT VIEWER ══ -->
+<div class="modal-overlay" id="modal-doc">
+  <div class="modal" style="width:640px;max-height:90vh;overflow-y:auto;">
+    <h2 id="modal-doc-title">Document</h2>
+    <div id="modal-doc-content" style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;min-height:200px;display:flex;align-items:center;justify-content:center;font-size:56px;margin-bottom:16px;overflow:hidden;">
+      <img id="modal-doc-img" style="width:100%;max-height:70vh;object-fit:contain;display:none;border-radius:16px;">
+      <span id="modal-doc-placeholder">📄</span>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-view" onclick="closeModal('modal-doc')">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: REJET ══ -->
+<div class="modal-overlay" id="modal-reject">
+  <div class="modal">
+    <h2>✕ Motif de rejet</h2>
+    <p>Expliquez pourquoi la demande de <strong id="reject-name"></strong> est rejetée.</p>
+    <select class="filter-select" id="reject-reason" style="width:100%;margin-bottom:12px;">
+      <option>Document illisible ou flou</option>
+      <option>Document expiré</option>
+      <option>Nom ne correspond pas</option>
+      <option>Selfie non conforme (pas pris en direct)</option>
+      <option>Document falsifié suspecté</option>
+    </select>
+    <textarea id="reject-notes" style="width:100%;background:var(--dark3);border:1.5px solid var(--border);border-radius:12px;padding:12px;font-size:13px;color:var(--white);font-family:'DM Sans',sans-serif;outline:none;resize:none;height:80px;margin-bottom:4px;" placeholder="Précisions supplémentaires (optionnel)..."></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-view" onclick="closeModal('modal-reject')">Annuler</button>
+      <button class="btn btn-reject" onclick="confirmReject()">Confirmer le rejet</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TOAST ══ -->
+<div class="toast" id="toast"><span style="font-size:20px;" id="toast-icon">✅</span><p id="toast-msg">Action réalisée</p></div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// CONFIG & STATE
+// ══════════════════════════════════════════════════════════════
+const API_BASE = window.location.origin + '/api';
+let currentPage = 'dashboard';
+let prosCurrentPage = 1;
+let clientsCurrentPage = 1;
+let payCurrentPage = 1;
+let currentRejectProId = null;
+let prosDebounceTimer = null;
+let clientsDebounceTimer = null;
+let dashboardData = null;
+
+const titles = {
+  dashboard: 'Tableau de bord',
+  'verif-id': 'Vérifications d\'identité',
+  professionals: 'Professionnels',
+  clients: 'Clients',
+  projects: 'Projets',
+  payments: 'Paiements',
+  support: 'Support',
+  deleted: 'Comptes supprimés'
+};
+
+// ══════════════════════════════════════════════════════════════
+// AUTH
+// ══════════════════════════════════════════════════════════════
+function getToken() {
+  return localStorage.getItem('admin_token');
+}
+
+function isLoggedIn() {
+  return !!getToken();
+}
+
+function logout() {
+  localStorage.removeItem('admin_token');
+  localStorage.removeItem('admin_user');
+  document.getElementById('login-overlay').classList.remove('hidden');
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  const btn = document.getElementById('login-btn');
+
+  if (!email || !password) {
+    errEl.textContent = 'Veuillez remplir tous les champs';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Connexion...';
+  errEl.style.display = 'none';
+
+  try {
+    const res = await fetch(API_BASE + '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Erreur de connexion');
+    }
+
+    if (data.user && data.user.role !== 'ADMIN') {
+      throw new Error('Accès réservé aux administrateurs');
+    }
+
+    localStorage.setItem('admin_token', data.token);
+    localStorage.setItem('admin_user', JSON.stringify(data.user));
+
+    // Update admin chip
+    if (data.user) {
+      document.getElementById('admin-name').textContent = (data.user.firstName || '') + ' ' + (data.user.lastName || '');
+      document.getElementById('admin-email').textContent = data.user.email || '';
+    }
+
+    document.getElementById('login-overlay').classList.add('hidden');
+    loadDashboard();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Se connecter';
+  }
+}
+
+// Enter key login
+document.getElementById('login-password').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doLogin();
+});
+document.getElementById('login-email').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') document.getElementById('login-password').focus();
+});
+
+// ══════════════════════════════════════════════════════════════
+// API HELPER
+// ══════════════════════════════════════════════════════════════
+async function apiCall(endpoint, options = {}) {
+  const token = getToken();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
+    ...(options.headers || {})
+  };
+
+  const res = await fetch(API_BASE + endpoint, { ...options, headers });
+
+  if (res.status === 401) {
+    logout();
+    showToast('Session expirée, veuillez vous reconnecter', true);
+    throw new Error('Unauthorized');
+  }
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Erreur ${res.status}`);
+  }
+
+  return res.json();
+}
+
+// ══════════════════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════════════════
+function showPage(id, el) {
+  currentPage = id;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) {
+    el.classList.add('active');
+  } else {
+    document.querySelectorAll('.nav-item').forEach(n => {
+      if (n.onclick && n.onclick.toString().includes("'" + id + "'")) n.classList.add('active');
+    });
+  }
+  document.getElementById('page-title').textContent = titles[id] || id;
+
+  // Load data for the page
+  switch (id) {
+    case 'dashboard': loadDashboard(); break;
+    case 'verif-id': loadVerifications(); break;
+    case 'professionals': loadProfessionals(1); break;
+    case 'clients': loadClients(1); break;
+    case 'projects': loadProjects(1); break;
+    case 'payments': loadPayments(1); loadPaymentStats(); break;
+    case 'support': loadSupportTickets(); break;
+    case 'deleted': loadDeletedUsers(1); break;
+  }
+}
+
+function refreshCurrentPage() {
+  showPage(currentPage, null);
+  showToast('Données actualisées');
+}
+
+// ══════════════════════════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════════════════════════
+async function loadDashboard() {
+  try {
+    const data = await apiCall('/admin/dashboard');
+    dashboardData = data;
+
+    // KPIs
+    document.getElementById('kpi-pros').textContent = formatNumber(data.users.professionals);
+    document.getElementById('kpi-clients').textContent = formatNumber(data.users.clients);
+    document.getElementById('kpi-projects').textContent = formatNumber(data.projects.total);
+    document.getElementById('kpi-projects-delta').textContent = '▲ ' + data.projects.open + ' ouverts';
+    document.getElementById('kpi-revenue').textContent = formatCurrency(data.payments.revenue);
+
+    // Alert
+    if (data.pendingVerifications > 0) {
+      document.getElementById('dashboard-alert').style.display = 'flex';
+      document.getElementById('dashboard-alert-text').innerHTML = '<strong>' + data.pendingVerifications + ' vérification(s) en attente</strong> — des identités nécessitent votre validation.';
+      document.getElementById('badge-id').textContent = data.pendingVerifications;
+      document.getElementById('badge-id').style.display = '';
+      document.getElementById('topbar-pending-btn').style.display = '';
+      document.getElementById('topbar-pending-count').textContent = data.pendingVerifications;
+    } else {
+      document.getElementById('dashboard-alert').style.display = 'none';
+      document.getElementById('badge-id').style.display = 'none';
+      document.getElementById('topbar-pending-btn').style.display = 'none';
+    }
+
+    // Project chart
+    const chartEl = document.getElementById('dashboard-projects-chart');
+    const projData = [
+      { label: 'Ouverts', val: data.projects.open },
+      { label: 'En cours', val: data.projects.inProgress },
+      { label: 'Terminés', val: data.projects.completed },
+      { label: 'Annulés', val: data.projects.cancelled }
+    ];
+    const maxVal = Math.max(...projData.map(d => d.val), 1);
+    chartEl.innerHTML = projData.map(d =>
+      '<div class="bar-item"><div class="bar-val">' + d.val + '</div><div class="bar" style="height:' + Math.max(5, (d.val / maxVal) * 100) + '%"></div><div class="bar-label">' + d.label + '</div></div>'
+    ).join('');
+
+    // Donut
+    const total = data.users.professionals + data.users.clients;
+    const proPct = total > 0 ? Math.round((data.users.professionals / total) * 100) : 0;
+    const cliPct = 100 - proPct;
+    document.getElementById('dashboard-donut-chart').style.background = 'conic-gradient(var(--orange) 0% ' + proPct + '%, var(--blue) ' + proPct + '% 100%)';
+    document.getElementById('dashboard-donut-legend').innerHTML =
+      '<div class="dl-item"><div class="dl-dot" style="background:var(--orange)"></div>Professionnels (' + proPct + '%)</div>' +
+      '<div class="dl-item"><div class="dl-dot" style="background:var(--blue)"></div>Clients (' + cliPct + '%)</div>';
+
+    // Latest users table
+    const tbody = document.getElementById('dashboard-latest-users');
+    if (data.latestUsers && data.latestUsers.length > 0) {
+      tbody.innerHTML = data.latestUsers.map(u => {
+        const roleBadge = u.role === 'PROFESSIONAL'
+          ? '<span class="badge badge-orange">Pro</span>'
+          : '<span class="badge badge-blue">Client</span>';
+        return '<tr><td><strong>' + escHtml(u.firstName + ' ' + u.lastName) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + '</span></td><td>' + roleBadge + '</td><td>' + escHtml(u.city || '-') + '</td><td>' + formatDate(u.createdAt) + '</td></tr>';
+      }).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px;">Aucune inscription récente</td></tr>';
+    }
+  } catch (err) {
+    if (err.message !== 'Unauthorized') {
+      console.error('Dashboard error:', err);
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// VERIFICATIONS
+// ══════════════════════════════════════════════════════════════
+async function loadVerifications() {
+  try {
+    const data = await apiCall('/admin/professionals?identityStatus=PENDING&limit=50');
+    const grid = document.getElementById('verif-grid');
+    const empty = document.getElementById('verif-empty');
+
+    if (!data.professionals || data.professionals.length === 0) {
+      grid.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+
+    empty.style.display = 'none';
+    grid.innerHTML = data.professionals.map(pro => {
+      const u = pro.user;
+      const name = (u.firstName || '') + ' ' + (u.lastName || '');
+      const tradeEmoji = getTradeEmoji(pro.trade);
+
+      // Build doc previews
+      let docsHtml = '<div class="vc-docs">';
+      if (pro.idDocumentUrl) {
+        docsHtml += '<div class="vc-doc" onclick="viewDocImage(\'' + escAttr(pro.idDocumentUrl) + '\', \'CNI Recto\')"><img src="' + escAttr(pro.idDocumentUrl) + '" onerror="this.style.display=\'none\';this.parentNode.innerHTML=\'🪪<span>CNI Recto</span>\'"></div>';
+      } else {
+        docsHtml += '<div class="vc-doc">🪪<span>CNI Recto</span></div>';
+      }
+      if (pro.idDocumentVersoUrl) {
+        docsHtml += '<div class="vc-doc" onclick="viewDocImage(\'' + escAttr(pro.idDocumentVersoUrl) + '\', \'CNI Verso\')"><img src="' + escAttr(pro.idDocumentVersoUrl) + '" onerror="this.style.display=\'none\';this.parentNode.innerHTML=\'🪪<span>CNI Verso</span>\'"></div>';
+      } else {
+        docsHtml += '<div class="vc-doc">🪪<span>CNI Verso</span></div>';
+      }
+      if (pro.selfieUrl) {
+        docsHtml += '<div class="vc-doc" onclick="viewDocImage(\'' + escAttr(pro.selfieUrl) + '\', \'Selfie\')"><img src="' + escAttr(pro.selfieUrl) + '" onerror="this.style.display=\'none\';this.parentNode.innerHTML=\'🤳<span>Selfie</span>\'"></div>';
+      } else {
+        docsHtml += '<div class="vc-doc">🤳<span>Selfie</span></div>';
+      }
+      docsHtml += '</div>';
+
+      // Trust score
+      const score = pro.trustScore ? (pro.trustScore.total || 0) : 0;
+      const afterScore = Math.min(100, score + 20);
+
+      return '<div class="verif-card" id="vc-' + pro.id + '">' +
+        '<div class="vc-header">' +
+          '<div class="vc-avatar">' + tradeEmoji + '</div>' +
+          '<div class="vc-info">' +
+            '<h3>' + escHtml(name) + '</h3>' +
+            '<p>' + escHtml(pro.trade || 'Non spécifié') + ' · ' + escHtml(u.city || 'Non spécifié') + '</p>' +
+            '<div class="vc-date">' + escHtml(u.email) + ' · Inscrit le ' + formatDate(u.createdAt) + '</div>' +
+          '</div>' +
+          '<span class="badge badge-yellow" style="margin-left:auto;">⏳ Pending</span>' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-bottom:8px;letter-spacing:1px;text-transform:uppercase;">Score de confiance</div>' +
+        '<div class="vc-score-bar"><div class="vc-score-fill" style="width:' + score + '%"></div></div>' +
+        '<div style="font-size:12px;color:var(--muted);margin-bottom:14px;">' + score + ' / 100 · Passera à <strong style="color:var(--orange)">' + afterScore + ' / 100</strong> après validation</div>' +
+        docsHtml +
+        '<div class="vc-actions">' +
+          '<button class="btn btn-reject" onclick="openRejectModal(\'' + escAttr(name) + '\',\'' + pro.id + '\')">✕ Rejeter</button>' +
+          '<button class="btn btn-approve" onclick="approveIdentity(\'' + pro.id + '\',\'' + escAttr(name) + '\')">✓ Approuver</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+  } catch (err) {
+    if (err.message !== 'Unauthorized') {
+      console.error('Verifications error:', err);
+      document.getElementById('verif-grid').innerHTML = '<div class="empty-state"><div class="es-icon">⚠️</div><p>Erreur lors du chargement</p></div>';
+    }
+  }
+}
+
+async function approveIdentity(proId, name) {
+  try {
+    await apiCall('/admin/professionals/' + proId + '/verify', { method: 'PATCH' });
+    const card = document.getElementById('vc-' + proId);
+    if (card) {
+      card.style.opacity = '0.4';
+      card.style.pointerEvents = 'none';
+      const badge = card.querySelector('.badge');
+      if (badge) {
+        badge.className = 'badge badge-green';
+        badge.textContent = '✓ Approuvé';
+      }
+    }
+    updatePendingBadge(-1);
+    showToast('Identité de ' + name + ' validée !');
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function confirmReject() {
+  if (!currentRejectProId) return;
+  try {
+    const reason = document.getElementById('reject-reason').value + (document.getElementById('reject-notes').value ? ' — ' + document.getElementById('reject-notes').value : '');
+    await apiCall('/admin/professionals/' + currentRejectProId + '/reject', { method: 'PATCH', body: JSON.stringify({ reason }) });
+    const card = document.getElementById('vc-' + currentRejectProId);
+    if (card) {
+      card.style.opacity = '0.4';
+      card.style.pointerEvents = 'none';
+      const badge = card.querySelector('.badge');
+      if (badge) {
+        badge.className = 'badge badge-red';
+        badge.textContent = '✕ Rejeté';
+      }
+    }
+    updatePendingBadge(-1);
+    closeModal('modal-reject');
+    showToast('Rejet notifié au professionnel');
+  } catch (err) {
+    closeModal('modal-reject');
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+function updatePendingBadge(delta) {
+  const badge = document.getElementById('badge-id');
+  let count = parseInt(badge.textContent) || 0;
+  count = Math.max(0, count + delta);
+  if (count <= 0) {
+    badge.style.display = 'none';
+    document.getElementById('topbar-pending-btn').style.display = 'none';
+  } else {
+    badge.textContent = count;
+    document.getElementById('topbar-pending-count').textContent = count;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// PROFESSIONALS
+// ══════════════════════════════════════════════════════════════
+function debouncePros() {
+  clearTimeout(prosDebounceTimer);
+  prosDebounceTimer = setTimeout(() => loadProfessionals(1), 400);
+}
+
+async function loadProfessionals(page) {
+  prosCurrentPage = page;
+  const search = document.getElementById('pros-search').value.trim();
+  const trade = document.getElementById('pros-trade-filter').value;
+  const status = document.getElementById('pros-status-filter').value;
+
+  let url = '/admin/professionals?page=' + page + '&limit=15';
+  if (trade) url += '&trade=' + encodeURIComponent(trade);
+  if (status) url += '&identityStatus=' + encodeURIComponent(status);
+  if (search) url += '&search=' + encodeURIComponent(search);
+
+  try {
+    const data = await apiCall(url);
+    const tbody = document.getElementById('pros-tbody');
+    const emptyEl = document.getElementById('pros-empty');
+    const paginationEl = document.getElementById('pros-pagination');
+
+    let pros = data.professionals || [];
+
+    if (pros.length === 0) {
+      tbody.innerHTML = '';
+      emptyEl.style.display = 'block';
+      paginationEl.style.display = 'none';
+      return;
+    }
+
+    emptyEl.style.display = 'none';
+    tbody.innerHTML = pros.map(pro => {
+      const u = pro.user;
+      const name = (u.firstName || '') + ' ' + (u.lastName || '');
+      const statusBadge = getStatusBadge(pro.identityStatus);
+      const premiumBadge = pro.subscription && pro.subscription.status === 'ACTIVE'
+        ? '<span class="badge badge-yellow" style="background:rgba(232,184,75,0.15);color:var(--gold);">⭐ Premium</span>'
+        : '<span class="badge badge-muted">Gratuit</span>';
+      const rating = pro.averageRating ? ('★ ' + pro.averageRating.toFixed(1) + ' (' + (pro.reviewCount || 0) + ')') : '—';
+      const missions = (pro.completedMissionsCount || 0);
+
+      const isSuspended = u.suspended;
+      let actions = '';
+      if (pro.identityStatus === 'PENDING') {
+        actions = '<button class="btn btn-approve" onclick="event.stopPropagation();approveProFromTable(\'' + pro.id + '\',\'' + escAttr(name) + '\',this)">✓</button><button class="btn btn-reject" onclick="event.stopPropagation();openRejectModal(\'' + escAttr(name) + '\',\'' + pro.id + '\')">✕</button>';
+      } else {
+        actions = '<button class="btn btn-view" onclick="event.stopPropagation();viewProfessional(\'' + pro.id + '\')">👁</button>';
+      }
+      if (isSuspended) {
+        actions += '<button class="btn btn-approve" onclick="event.stopPropagation();reactivatePro(\'' + pro.id + '\',\'' + escAttr(name) + '\')" title="Réactiver">↺</button>';
+      } else {
+        actions += '<button class="btn btn-reject" onclick="event.stopPropagation();suspendPro(\'' + pro.id + '\',\'' + escAttr(name) + '\')" title="Suspendre">⏸</button>';
+      }
+      actions += '<button class="btn btn-reject" onclick="event.stopPropagation();deleteProfessional(\'' + pro.id + '\',\'' + escAttr(name) + '\')" title="Supprimer">🗑</button>';
+
+      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(u.id) + '" onclick="navigator.clipboard.writeText(\'' + escAttr(u.id) + '\');showToast(\'ID copié\')">' + escHtml(u.id.substring(0, 6)) + '</span></td><td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + '</span></td><td>' + escHtml(pro.trade || '-') + '</td><td>' + escHtml(u.city || '-') + '</td><td style="color:var(--orange)">' + rating + '</td><td>' + missions + '</td><td>' + statusBadge + '</td><td>' + premiumBadge + '</td><td class="td-actions">' + actions + '</td></tr>';
+    }).join('');
+
+    // Pagination
+    const pagination = data.pagination;
+    if (pagination && pagination.totalPages > 1) {
+      paginationEl.style.display = 'flex';
+      document.getElementById('pros-page-info').textContent = 'Page ' + pagination.page + ' / ' + pagination.totalPages + ' (' + pagination.total + ' résultats)';
+      document.getElementById('pros-prev').disabled = pagination.page <= 1;
+      document.getElementById('pros-next').disabled = pagination.page >= pagination.totalPages;
+    } else {
+      paginationEl.style.display = 'none';
+    }
+  } catch (err) {
+    if (err.message !== 'Unauthorized') {
+      console.error('Professionals error:', err);
+    }
+  }
+}
+
+async function approveProFromTable(proId, name, btn) {
+  try {
+    await apiCall('/admin/professionals/' + proId + '/verify', { method: 'PATCH' });
+    showToast('Identité de ' + name + ' validée !');
+    loadProfessionals(prosCurrentPage);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function suspendPro(proId, name) {
+  if (!confirm('Suspendre le compte de ' + name + ' ?')) return;
+  try {
+    await apiCall('/admin/professionals/' + proId + '/suspend', { method: 'PATCH' });
+    showToast('Compte de ' + name + ' suspendu');
+    loadProfessionals(prosCurrentPage);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function reactivatePro(proId, name) {
+  try {
+    await apiCall('/admin/professionals/' + proId + '/reactivate', { method: 'PATCH' });
+    showToast('Compte de ' + name + ' réactivé');
+    loadProfessionals(prosCurrentPage);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function deleteProfessional(proId, name) {
+  if (!confirm('Supprimer le profil professionnel de ' + name + ' ? Cette action est irréversible.')) return;
+  try {
+    await apiCall('/admin/professionals/' + proId, { method: 'DELETE' });
+    showToast('Profil de ' + name + ' supprimé');
+    loadProfessionals(prosCurrentPage);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function viewProfessional(proId) {
+  try {
+    const data = await apiCall('/admin/professionals/' + proId);
+    const u = data.user;
+    const name = (u.firstName || '') + ' ' + (u.lastName || '');
+    const avatar = u.avatarUrl || data.selfieUrl || null;
+    const rating = data.averageRating ? data.averageRating.toFixed(1) : '—';
+    const stars = data.averageRating ? '★'.repeat(Math.round(data.averageRating)) + '☆'.repeat(5 - Math.round(data.averageRating)) : '';
+
+    let html = '<div style="display:flex;gap:20px;align-items:flex-start;margin-bottom:20px;">';
+    // Photo
+    html += '<div style="flex-shrink:0;">';
+    if (avatar) {
+      html += '<img src="' + escHtml(avatar) + '" style="width:100px;height:100px;border-radius:16px;object-fit:cover;border:2px solid var(--orange);" onerror="this.src=\'\';this.style.display=\'none\';this.parentNode.innerHTML=\'<div style=\\\'width:100px;height:100px;border-radius:16px;background:rgba(244,114,11,0.12);display:flex;align-items:center;justify-content:center;font-size:40px;\\\'>👷</div>\'">';
+    } else {
+      html += '<div style="width:100px;height:100px;border-radius:16px;background:rgba(244,114,11,0.12);display:flex;align-items:center;justify-content:center;font-size:40px;">👷</div>';
+    }
+    html += '</div>';
+    // Infos principales
+    html += '<div style="flex:1;">';
+    html += '<h3 style="font-family:Syne,sans-serif;font-size:20px;font-weight:800;color:var(--white);margin-bottom:4px;">' + escHtml(name) + '</h3>';
+    html += '<p style="color:var(--orange);font-weight:600;font-size:14px;margin-bottom:4px;">' + escHtml(data.trade || 'Non spécifié') + '</p>';
+    html += '<p style="color:var(--muted);font-size:12px;">' + escHtml(u.email) + (u.phone ? ' · ' + escHtml(u.phone) : '') + '</p>';
+    html += '<p style="color:var(--muted);font-size:12px;">📍 ' + escHtml(u.city || 'Non spécifié') + '</p>';
+    html += '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">' + getStatusBadge(data.identityStatus);
+    if (data.subscription && data.subscription.status === 'ACTIVE') {
+      html += '<span class="badge badge-yellow" style="background:rgba(232,184,75,0.15);color:var(--gold);">⭐ Premium</span>';
+    }
+    if (u.suspended) {
+      html += '<span class="badge badge-red">⏸ Suspendu</span>';
+    }
+    html += '</div></div></div>';
+
+    // Stats en grille
+    html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">';
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center;"><div style="font-family:Syne,sans-serif;font-size:20px;font-weight:800;color:var(--orange);">' + rating + '</div><div style="font-size:11px;color:var(--muted);">Note ' + stars + '</div></div>';
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center;"><div style="font-family:Syne,sans-serif;font-size:20px;font-weight:800;color:var(--green);">' + (data.completedMissionsCount || 0) + '</div><div style="font-size:11px;color:var(--muted);">Missions</div></div>';
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center;"><div style="font-family:Syne,sans-serif;font-size:20px;font-weight:800;color:var(--blue);">' + (data.reviewCount || 0) + '</div><div style="font-size:11px;color:var(--muted);">Avis</div></div>';
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center;"><div style="font-family:Syne,sans-serif;font-size:20px;font-weight:800;color:var(--white);">' + (data.yearsExperience || '—') + '</div><div style="font-size:11px;color:var(--muted);">Ans exp.</div></div>';
+    html += '</div>';
+
+    // Informations détaillées
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;">';
+    html += '<h4 style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Informations</h4>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">';
+    html += '<div><span style="color:var(--muted);">ID :</span> <span style="color:var(--white);font-family:monospace;font-size:11px;">' + escHtml(data.id.substring(0, 8)) + '...</span></div>';
+    html += '<div><span style="color:var(--muted);">Type :</span> <span style="color:var(--white);">' + escHtml(data.accountType === 'ENTREPRISE' ? 'Entreprise' : 'Indépendant') + '</span></div>';
+    if (data.companyName) html += '<div><span style="color:var(--muted);">Société :</span> <span style="color:var(--white);">' + escHtml(data.companyName) + '</span></div>';
+    if (data.siret) html += '<div><span style="color:var(--muted);">RCCM/SIRET :</span> <span style="color:var(--white);">' + escHtml(data.siret) + '</span></div>';
+    html += '<div><span style="color:var(--muted);">Rayon :</span> <span style="color:var(--white);">' + (data.interventionRadiusKm || 30) + ' km</span></div>';
+    html += '<div><span style="color:var(--muted);">Inscrit le :</span> <span style="color:var(--white);">' + formatDate(u.createdAt) + '</span></div>';
+    if (data.hourlyRate) html += '<div><span style="color:var(--muted);">Tarif :</span> <span style="color:var(--orange);">' + formatNumber(data.hourlyRate) + ' FCFA/h</span></div>';
+    html += '</div></div>';
+
+    // Description
+    if (data.description) {
+      html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;">';
+      html += '<h4 style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Description</h4>';
+      html += '<p style="font-size:13px;color:var(--light);line-height:1.6;">' + escHtml(data.description) + '</p>';
+      html += '</div>';
+    }
+
+    // Score de confiance détaillé
+    if (data.trustScore) {
+      const ts = data.trustScore;
+      const scoreColor = ts.total >= 70 ? 'var(--green)' : ts.total >= 40 ? 'var(--orange)' : 'var(--red)';
+      html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
+      html += '<h4 style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:0;">Score de confiance</h4>';
+      html += '<span style="font-family:Syne,sans-serif;font-size:24px;font-weight:800;color:' + scoreColor + ';">' + ts.total + '<span style="font-size:14px;color:var(--muted);font-weight:400;">/100</span></span>';
+      html += '</div>';
+      html += '<div style="height:6px;background:var(--dark2);border-radius:3px;margin-bottom:14px;overflow:hidden;"><div style="height:100%;width:' + ts.total + '%;background:' + scoreColor + ';border-radius:3px;transition:width 0.5s;"></div></div>';
+      // Bonus
+      if (ts.bonus && ts.bonus.length > 0) {
+        html += '<div style="margin-bottom:10px;"><div style="font-size:11px;color:var(--green);font-weight:600;margin-bottom:6px;">✓ BONUS</div>';
+        ts.bonus.forEach(b => {
+          html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;"><span style="color:var(--light);">' + escHtml(b.label) + '</span><span style="color:var(--green);font-weight:600;">+' + b.points + '</span></div>';
+        });
+        html += '</div>';
+      }
+      // Pénalités
+      if (ts.penalties && ts.penalties.length > 0) {
+        html += '<div style="margin-bottom:10px;"><div style="font-size:11px;color:var(--red);font-weight:600;margin-bottom:6px;">✕ PÉNALITÉS</div>';
+        ts.penalties.forEach(p => {
+          html += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;"><span style="color:var(--light);">' + escHtml(p.label) + '</span><span style="color:var(--red);font-weight:600;">' + p.points + '</span></div>';
+        });
+        html += '</div>';
+      }
+      // Actions plainte
+      html += '<div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">';
+      html += '<button class="btn btn-reject" style="font-size:11px;padding:6px 12px;" onclick="addComplaint(\'' + data.id + '\')">⚠️ Ajouter plainte</button>';
+      html += '<button class="btn btn-view" style="font-size:11px;padding:6px 12px;" onclick="removeComplaint(\'' + data.id + '\')">↩️ Retirer plainte</button>';
+      html += '<span style="font-size:11px;color:var(--muted);align-self:center;margin-left:auto;">Plaintes : ' + (data.complaintsCount || 0) + '</span>';
+      html += '</div></div>';
+    }
+
+    // Portfolio
+    if (data.portfolio && data.portfolio.length > 0) {
+      html += '<div style="margin-bottom:16px;">';
+      html += '<h4 style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Portfolio (' + data.portfolio.length + ')</h4>';
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+      data.portfolio.slice(0, 8).forEach(item => {
+        html += '<img src="' + escHtml(item.imageUrl) + '" style="width:70px;height:70px;object-fit:cover;border-radius:10px;border:1px solid var(--border);cursor:pointer;" onclick="viewDocImage(\'' + escAttr(item.imageUrl) + '\',\'' + escAttr(item.caption || 'Portfolio') + '\')" onerror="this.style.display=\'none\'">';
+      });
+      html += '</div></div>';
+    }
+
+    // Derniers avis
+    if (data.reviews && data.reviews.length > 0) {
+      html += '<div style="margin-bottom:16px;">';
+      html += '<h4 style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Derniers avis</h4>';
+      data.reviews.slice(0, 3).forEach(r => {
+        const authorName = r.author ? (r.author.firstName + ' ' + r.author.lastName) : 'Anonyme';
+        html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:6px;">';
+        html += '<div style="display:flex;justify-content:space-between;"><strong style="color:var(--white);font-size:12px;">' + escHtml(authorName) + '</strong><span style="color:var(--orange);font-size:12px;">' + '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating) + '</span></div>';
+        if (r.comment) html += '<p style="font-size:12px;color:var(--light);margin-top:4px;">' + escHtml(r.comment) + '</p>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    document.getElementById('mp-title').textContent = 'Profil — ' + name;
+    document.getElementById('mp-content').innerHTML = html;
+    document.getElementById('modal-project').classList.add('show');
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function addComplaint(proId) {
+  if (!confirm('Confirmer l\'ajout d\'une plainte ? Cela réduira le score de confiance de -10 points.')) return;
+  try {
+    const res = await apiCall('/admin/professionals/' + proId + '/complaint', { method: 'POST' });
+    showToast('Plainte enregistrée (total: ' + res.complaintsCount + ')');
+    viewProfessional(proId);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function removeComplaint(proId) {
+  if (!confirm('Retirer une plainte de ce professionnel ?')) return;
+  try {
+    const res = await apiCall('/admin/professionals/' + proId + '/complaint', { method: 'DELETE' });
+    showToast('Plainte retirée (total: ' + res.complaintsCount + ')');
+    viewProfessional(proId);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// CLIENTS
+// ══════════════════════════════════════════════════════════════
+function debounceClients() {
+  clearTimeout(clientsDebounceTimer);
+  clientsDebounceTimer = setTimeout(() => loadClients(1), 400);
+}
+
+async function loadClients(page) {
+  clientsCurrentPage = page;
+  const search = document.getElementById('clients-search').value.trim();
+
+  let url = '/admin/users?role=CLIENT&page=' + page + '&limit=15';
+  if (search) url += '&search=' + encodeURIComponent(search);
+
+  try {
+    const data = await apiCall(url);
+    const tbody = document.getElementById('clients-tbody');
+    const emptyEl = document.getElementById('clients-empty');
+    const paginationEl = document.getElementById('clients-pagination');
+
+    if (!data.users || data.users.length === 0) {
+      tbody.innerHTML = '';
+      emptyEl.style.display = 'block';
+      paginationEl.style.display = 'none';
+      return;
+    }
+
+    emptyEl.style.display = 'none';
+    tbody.innerHTML = data.users.map(u => {
+      const name = (u.firstName || '') + ' ' + (u.lastName || '');
+      const suspended = u.suspended;
+      const statusBadge = suspended
+        ? '<span class="badge badge-red">Suspendu</span>'
+        : '<span class="badge badge-green">Actif</span>';
+
+      const actions = suspended
+        ? '<button class="btn btn-approve" onclick="event.stopPropagation();reactivateUser(\'' + u.id + '\',\'' + escAttr(name) + '\')">↺ Réactiver</button>'
+        : '<button class="btn btn-reject" onclick="event.stopPropagation();suspendUser(\'' + u.id + '\',\'' + escAttr(name) + '\')">⏸ Suspendre</button>';
+
+      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(u.id) + '" onclick="navigator.clipboard.writeText(\'' + escAttr(u.id) + '\');showToast(\'ID copié\')">' + escHtml(u.id.substring(0, 6)) + '</span></td><td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + (u.phone ? ' · ' + escHtml(u.phone) : '') + '</span></td><td>' + escHtml(u.city || '-') + '</td><td>' + statusBadge + '</td><td>' + formatDate(u.createdAt) + '</td><td class="td-actions">' + actions + '<button class="btn btn-reject" onclick="event.stopPropagation();deleteUser(\'' + u.id + '\',\'' + escAttr(name) + '\')" title="Supprimer">🗑</button></td></tr>';
+    }).join('');
+
+    // Pagination
+    const pagination = data.pagination;
+    if (pagination && pagination.totalPages > 1) {
+      paginationEl.style.display = 'flex';
+      document.getElementById('clients-page-info').textContent = 'Page ' + pagination.page + ' / ' + pagination.totalPages + ' (' + pagination.total + ' résultats)';
+      document.getElementById('clients-prev').disabled = pagination.page <= 1;
+      document.getElementById('clients-next').disabled = pagination.page >= pagination.totalPages;
+    } else {
+      paginationEl.style.display = 'none';
+    }
+  } catch (err) {
+    if (err.message !== 'Unauthorized') {
+      console.error('Clients error:', err);
+    }
+  }
+}
+
+async function suspendUser(userId, name) {
+  if (!confirm('Suspendre le compte de ' + name + ' ?')) return;
+  try {
+    await apiCall('/admin/users/' + userId + '/suspend', { method: 'PATCH' });
+    showToast('Compte de ' + name + ' suspendu');
+    loadClients(clientsCurrentPage);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function reactivateUser(userId, name) {
+  try {
+    await apiCall('/admin/users/' + userId + '/reactivate', { method: 'PATCH' });
+    showToast('Compte de ' + name + ' réactivé');
+    loadClients(clientsCurrentPage);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function deleteUser(userId, name) {
+  if (!confirm('Supprimer définitivement ' + name + ' ? Cette action est irréversible.')) return;
+  try {
+    await apiCall('/admin/users/' + userId, { method: 'DELETE' });
+    showToast('Compte de ' + name + ' supprimé');
+    loadClients(clientsCurrentPage);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// PROJECTS
+// ══════════════════════════════════════════════════════════════
+async function loadProjects(page = 1) {
+  try {
+    // Charger les KPIs depuis le dashboard
+    let data = dashboardData;
+    if (!data) {
+      data = await apiCall('/admin/dashboard');
+      dashboardData = data;
+    }
+    document.getElementById('proj-open').textContent = data.projects.open;
+    document.getElementById('proj-progress').textContent = data.projects.inProgress;
+    document.getElementById('proj-completed').textContent = data.projects.completed;
+    document.getElementById('proj-cancelled').textContent = data.projects.cancelled;
+
+    // Charger la liste des projets
+    const status = document.getElementById('proj-status-filter').value;
+    const search = document.getElementById('proj-search').value;
+    let url = '/admin/projects?page=' + page + '&limit=15';
+    if (status) url += '&status=' + status;
+    if (search) url += '&search=' + encodeURIComponent(search);
+
+    const result = await apiCall(url);
+    const tbody = document.getElementById('projects-tbody');
+    const empty = document.getElementById('projects-empty');
+
+    if (!result.projects || result.projects.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+    } else {
+      empty.style.display = 'none';
+      tbody.innerHTML = result.projects.map(p => {
+        const clientName = p.client ? escHtml(p.client.firstName + ' ' + p.client.lastName) : '-';
+        const budget = p.budgetMin && p.budgetMax
+          ? formatNumber(p.budgetMin) + ' – ' + formatNumber(p.budgetMax) + ' FCFA'
+          : p.budgetMin ? formatNumber(p.budgetMin) + '+ FCFA'
+          : p.budgetMax ? '≤ ' + formatNumber(p.budgetMax) + ' FCFA'
+          : '-';
+        const statusBadge = getProjectStatusBadge(p.status);
+        const quotesCount = p.quotes ? p.quotes.length : 0;
+        return '<tr onclick="viewProject(\'' + p.id + '\')" style="cursor:pointer;">' +
+          '<td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(p.id) + '" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + escAttr(p.id) + '\');showToast(\'ID copié\')">' + escHtml(p.id.substring(0, 6)) + '</span></td>' +
+          '<td><strong>' + escHtml(p.title) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(p.description || '').substring(0, 50) + (p.description && p.description.length > 50 ? '…' : '') + '</span></td>' +
+          '<td>' + clientName + '</td>' +
+          '<td>' + escHtml(p.tradeNeeded || '-') + '</td>' +
+          '<td>' + escHtml(p.city || '-') + '</td>' +
+          '<td style="color:var(--orange);font-weight:500;white-space:nowrap;">' + budget + '</td>' +
+          '<td style="text-align:center;">' + quotesCount + '</td>' +
+          '<td>' + statusBadge + '</td>' +
+          '<td>' + formatDate(p.createdAt) + '</td>' +
+          '<td class="td-actions">' +
+            '<button class="btn btn-view" onclick="event.stopPropagation();viewProject(\'' + p.id + '\')" title="Voir détail">👁</button>' +
+            '<button class="btn btn-reject" onclick="event.stopPropagation();deleteProject(\'' + p.id + '\',\'' + escAttr(p.title) + '\')" title="Supprimer">🗑</button>' +
+          '</td></tr>';
+      }).join('');
+    }
+
+    // Pagination
+    const pag = document.getElementById('projects-pagination');
+    if (result.totalPages > 1) {
+      let pagHtml = '';
+      if (page > 1) pagHtml += '<button class="btn btn-view" onclick="loadProjects(' + (page - 1) + ')">← Précédent</button>';
+      pagHtml += '<span style="color:var(--muted);font-size:13px;padding:8px;">Page ' + page + ' / ' + result.totalPages + '</span>';
+      if (page < result.totalPages) pagHtml += '<button class="btn btn-view" onclick="loadProjects(' + (page + 1) + ')">Suivant →</button>';
+      pag.innerHTML = pagHtml;
+    } else {
+      pag.innerHTML = '';
+    }
+  } catch (err) {
+    if (err.message !== 'Unauthorized') {
+      console.error('Projects error:', err);
+    }
+  }
+}
+
+async function viewProject(id) {
+  try {
+    const p = await apiCall('/admin/projects/' + id);
+    const clientName = p.client ? escHtml(p.client.firstName + ' ' + p.client.lastName) : '-';
+    const clientEmail = p.client ? escHtml(p.client.email || '') : '';
+    const clientPhone = p.client ? escHtml(p.client.phone || '') : '';
+    const budget = p.budgetMin && p.budgetMax
+      ? formatNumber(p.budgetMin) + ' – ' + formatNumber(p.budgetMax) + ' FCFA'
+      : p.budgetMin ? formatNumber(p.budgetMin) + '+ FCFA' : p.budgetMax ? '≤ ' + formatNumber(p.budgetMax) + ' FCFA' : 'Non défini';
+
+    let html = '';
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
+    html += '<span style="font-size:13px;color:var(--muted);">Statut</span>' + getProjectStatusBadge(p.status);
+    html += '</div>';
+    html += '<p style="font-size:14px;color:var(--light);line-height:1.6;">' + escHtml(p.description) + '</p>';
+    html += '</div>';
+
+    // Infos
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">';
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:14px;"><span style="font-size:11px;color:var(--muted);text-transform:uppercase;">Client</span><p style="color:var(--white);font-weight:600;margin-top:4px;">' + clientName + '</p><p style="font-size:12px;color:var(--muted);">' + clientEmail + (clientPhone ? ' · ' + clientPhone : '') + '</p></div>';
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:14px;"><span style="font-size:11px;color:var(--muted);text-transform:uppercase;">Métier recherché</span><p style="color:var(--white);font-weight:600;margin-top:4px;">' + escHtml(p.tradeNeeded) + '</p></div>';
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:14px;"><span style="font-size:11px;color:var(--muted);text-transform:uppercase;">Ville</span><p style="color:var(--white);font-weight:600;margin-top:4px;">' + escHtml(p.city) + '</p></div>';
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:14px;"><span style="font-size:11px;color:var(--muted);text-transform:uppercase;">Budget</span><p style="color:var(--orange);font-weight:600;margin-top:4px;">' + budget + '</p></div>';
+    html += '</div>';
+
+    // Photos
+    if (p.photos && p.photos.length > 0) {
+      html += '<div style="margin-bottom:16px;"><span style="font-size:12px;color:var(--muted);text-transform:uppercase;">Photos du projet</span>';
+      html += '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">';
+      p.photos.forEach(ph => {
+        html += '<img src="' + escHtml(ph.imageUrl) + '" style="width:80px;height:80px;object-fit:cover;border-radius:10px;border:1px solid var(--border);" onerror="this.style.display=\'none\'">';
+      });
+      html += '</div></div>';
+    }
+
+    // Devis
+    if (p.quotes && p.quotes.length > 0) {
+      html += '<div style="margin-bottom:16px;"><span style="font-size:12px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:8px;">Devis reçus (' + p.quotes.length + ')</span>';
+      p.quotes.forEach(q => {
+        const proName = q.professional && q.professional.user ? escHtml(q.professional.user.firstName + ' ' + q.professional.user.lastName) : '-';
+        const qStatus = q.status === 'ACCEPTED' ? '<span class="badge badge-green">Accepté</span>'
+          : q.status === 'REFUSED' ? '<span class="badge badge-red">Refusé</span>'
+          : '<span class="badge badge-yellow">En attente</span>';
+        html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">';
+        html += '<div><strong style="color:var(--white);">' + proName + '</strong><p style="font-size:12px;color:var(--muted);margin-top:2px;">' + escHtml(q.description || '').substring(0, 80) + '</p></div>';
+        html += '<div style="text-align:right;"><span style="color:var(--orange);font-weight:700;font-size:15px;">' + formatNumber(q.amount) + ' FCFA</span><br>' + qStatus + '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Aucun devis reçu pour le moment.</p>';
+    }
+
+    // Avis
+    if (p.review) {
+      html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px;">';
+      html += '<span style="font-size:11px;color:var(--muted);text-transform:uppercase;">Avis du client</span>';
+      html += '<p style="color:var(--orange);font-size:16px;margin-top:6px;">' + '★'.repeat(p.review.rating) + '☆'.repeat(5 - p.review.rating) + '</p>';
+      if (p.review.comment) html += '<p style="color:var(--light);font-size:13px;margin-top:6px;">"' + escHtml(p.review.comment) + '"</p>';
+      html += '</div>';
+    }
+
+    document.getElementById('mp-title').textContent = p.title;
+    document.getElementById('mp-content').innerHTML = html;
+    document.getElementById('modal-project').classList.add('show');
+  } catch (err) {
+    showToast('Erreur lors du chargement du projet');
+    console.error(err);
+  }
+}
+
+async function deleteProject(id, title) {
+  if (!confirm('Supprimer le projet "' + title + '" ? Cette action est irréversible.')) return;
+  try {
+    await apiCall('/admin/projects/' + id, { method: 'DELETE' });
+    showToast('🗑 Projet supprimé');
+    loadProjects(1);
+  } catch (err) {
+    showToast('Erreur lors de la suppression');
+    console.error(err);
+  }
+}
+
+function getProjectStatusBadge(status) {
+  switch (status) {
+    case 'OPEN': return '<span class="badge badge-green">● Ouvert</span>';
+    case 'IN_PROGRESS': return '<span class="badge badge-blue">▶ En cours</span>';
+    case 'COMPLETED': return '<span class="badge badge-orange">✓ Terminé</span>';
+    case 'CANCELLED': return '<span class="badge badge-red">✕ Annulé</span>';
+    default: return '<span class="badge badge-muted">' + escHtml(status || '-') + '</span>';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// PAYMENTS
+// ══════════════════════════════════════════════════════════════
+async function loadPaymentStats() {
+  try {
+    const stats = await apiCall('/admin/payments/stats');
+    document.getElementById('pay-revenue').textContent = formatCurrency(stats.totalRevenue);
+    document.getElementById('pay-count').textContent = formatNumber(stats.totalSuccessfulPayments);
+    document.getElementById('pay-failed').textContent = formatNumber(stats.failedPayments);
+  } catch (err) {
+    if (err.message !== 'Unauthorized') {
+      console.error('Payment stats error:', err);
+    }
+  }
+}
+
+async function loadPayments(page) {
+  payCurrentPage = page;
+  const status = document.getElementById('pay-status-filter').value;
+  const search = document.getElementById('pay-search').value;
+
+  let url = '/admin/payments?page=' + page + '&limit=15';
+  if (status) url += '&status=' + encodeURIComponent(status);
+  if (search) url += '&search=' + encodeURIComponent(search);
+
+  try {
+    const data = await apiCall(url);
+    const tbody = document.getElementById('payments-tbody');
+    const emptyEl = document.getElementById('payments-empty');
+    const paginationEl = document.getElementById('payments-pagination');
+
+    if (!data.payments || data.payments.length === 0) {
+      tbody.innerHTML = '';
+      emptyEl.style.display = 'block';
+      paginationEl.style.display = 'none';
+      return;
+    }
+
+    emptyEl.style.display = 'none';
+    tbody.innerHTML = data.payments.map(pay => {
+      const statusBadge = getPaymentStatusBadge(pay.status);
+      const proName = pay.quote && pay.quote.professional && pay.quote.professional.user
+        ? (pay.quote.professional.user.firstName + ' ' + pay.quote.professional.user.lastName)
+        : '-';
+      const projectTitle = pay.quote && pay.quote.project ? pay.quote.project.title : '-';
+
+      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(pay.id) + '" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + escAttr(pay.id) + '\');showToast(\'ID copié\')">' + escHtml(pay.id.substring(0, 6)) + '</span></td><td style="color:var(--orange);font-weight:600">' + formatNumber(pay.amount) + ' FCFA</td><td>' + statusBadge + '</td><td>' + escHtml(proName) + '</td><td>' + escHtml(projectTitle) + '</td><td>' + formatDate(pay.createdAt) + '</td></tr>';
+    }).join('');
+
+    // Pagination
+    const pagination = data.pagination;
+    if (pagination && pagination.totalPages > 1) {
+      paginationEl.style.display = 'flex';
+      document.getElementById('pay-page-info').textContent = 'Page ' + pagination.page + ' / ' + pagination.totalPages + ' (' + pagination.total + ' résultats)';
+      document.getElementById('pay-prev').disabled = pagination.page <= 1;
+      document.getElementById('pay-next').disabled = pagination.page >= pagination.totalPages;
+    } else {
+      paginationEl.style.display = 'none';
+    }
+  } catch (err) {
+    if (err.message !== 'Unauthorized') {
+      console.error('Payments error:', err);
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// COMPTES SUPPRIMÉS
+// ══════════════════════════════════════════════════════════════
+async function loadDeletedUsers(page = 1) {
+  try {
+    const search = document.getElementById('deleted-search').value;
+    let url = '/admin/users-deleted?page=' + page + '&limit=15';
+    if (search) url += '&search=' + encodeURIComponent(search);
+
+    const result = await apiCall(url);
+    const tbody = document.getElementById('deleted-tbody');
+    const empty = document.getElementById('deleted-empty');
+
+    if (!result.users || result.users.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+    } else {
+      empty.style.display = 'none';
+      tbody.innerHTML = result.users.map(u => {
+        const roleBadge = u.role === 'PROFESSIONAL' ? '<span style="color:var(--orange)">Pro</span>' : '<span style="color:var(--blue)">Client</span>';
+        return '<tr>' +
+          '<td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(u.id) + '" onclick="navigator.clipboard.writeText(\'' + escAttr(u.id) + '\');showToast(\'ID copié\')">' + escHtml(u.id.substring(0, 6)) + '</span></td>' +
+          '<td><strong>' + escHtml(u.firstName + ' ' + u.lastName) + '</strong></td>' +
+          '<td>' + escHtml(u.email) + '</td>' +
+          '<td>' + roleBadge + '</td>' +
+          '<td>' + escHtml(u.city || '-') + '</td>' +
+          '<td>' + formatDate(u.deletedAt) + '</td>' +
+          '<td>' + formatDate(u.createdAt) + '</td>' +
+          '<td class="td-actions">' +
+            '<button class="btn btn-approve" onclick="restoreUser(\'' + u.id + '\',\'' + escAttr(u.firstName + ' ' + u.lastName) + '\')" title="Réactiver">♻️ Réactiver</button>' +
+            '<button class="btn btn-reject" onclick="purgeUser(\'' + u.id + '\',\'' + escAttr(u.firstName + ' ' + u.lastName) + '\')" title="Supprimer définitivement" style="margin-left:4px;">🗑 Purger</button>' +
+          '</td></tr>';
+      }).join('');
+    }
+
+    // Pagination
+    const pag = document.getElementById('deleted-pagination');
+    if (result.totalPages > 1) {
+      let pagHtml = '';
+      if (page > 1) pagHtml += '<button class="btn btn-view" onclick="loadDeletedUsers(' + (page - 1) + ')">← Précédent</button>';
+      pagHtml += '<span style="color:var(--muted);font-size:13px;padding:8px;">Page ' + page + ' / ' + result.totalPages + ' (' + result.total + ' comptes)</span>';
+      if (page < result.totalPages) pagHtml += '<button class="btn btn-view" onclick="loadDeletedUsers(' + (page + 1) + ')">Suivant →</button>';
+      pag.innerHTML = pagHtml;
+    } else {
+      pag.innerHTML = '';
+    }
+  } catch (err) {
+    if (err.message !== 'Unauthorized') console.error('Deleted users error:', err);
+  }
+}
+
+async function restoreUser(id, name) {
+  if (!confirm('Réactiver le compte de ' + name + ' ?')) return;
+  try {
+    await apiCall('/admin/users/' + id + '/restore', { method: 'PATCH' });
+    showToast('Compte réactivé');
+    loadDeletedUsers(1);
+  } catch (err) {
+    alert('Erreur: ' + (err.message || 'Impossible de réactiver'));
+  }
+}
+
+async function purgeUser(id, name) {
+  if (!confirm('⚠️ ATTENTION : Supprimer DÉFINITIVEMENT le compte de ' + name + ' ?\n\nCette action est IRRÉVERSIBLE. Toutes les données seront perdues.')) return;
+  if (!confirm('Dernière confirmation : êtes-vous sûr de vouloir purger ce compte ?')) return;
+  try {
+    await apiCall('/admin/users/' + id + '/purge', { method: 'DELETE' });
+    showToast('Compte définitivement supprimé');
+    loadDeletedUsers(1);
+  } catch (err) {
+    alert('Erreur: ' + (err.message || 'Impossible de supprimer'));
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// MODALS
+// ══════════════════════════════════════════════════════════════
+function viewDocImage(url, title) {
+  document.getElementById('modal-doc-title').textContent = title;
+  const img = document.getElementById('modal-doc-img');
+  const placeholder = document.getElementById('modal-doc-placeholder');
+  if (url) {
+    img.src = url;
+    img.style.display = 'block';
+    placeholder.style.display = 'none';
+  } else {
+    img.style.display = 'none';
+    placeholder.style.display = 'block';
+  }
+  document.getElementById('modal-doc').classList.add('show');
+}
+
+function openRejectModal(name, proId) {
+  document.getElementById('reject-name').textContent = name;
+  currentRejectProId = proId;
+  document.getElementById('modal-reject').classList.add('show');
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('show');
+}
+
+// Click outside modal to close
+document.querySelectorAll('.modal-overlay').forEach(m => {
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); });
+});
+
+// ══════════════════════════════════════════════════════════════
+// TOAST
+// ══════════════════════════════════════════════════════════════
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  const icon = document.getElementById('toast-icon');
+  document.getElementById('toast-msg').textContent = msg;
+  icon.textContent = isError ? '⚠️' : '✅';
+  t.style.borderColor = isError ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)';
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+// ══════════════════════════════════════════════════════════════
+// HELPERS
+// ══════════════════════════════════════════════════════════════
+function formatNumber(n) {
+  if (n === null || n === undefined) return '--';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
+  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+function formatCurrency(amount) {
+  if (amount === null || amount === undefined) return '--';
+  if (amount >= 1000000) return (amount / 1000000).toFixed(1) + 'M';
+  if (amount >= 1000) return (amount / 1000).toFixed(0) + 'k';
+  return amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '-';
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 86400000 && d.getDate() === now.getDate()) {
+    return "Aujourd'hui, " + d.getHours().toString().padStart(2, '0') + 'h' + d.getMinutes().toString().padStart(2, '0');
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.getDate() === yesterday.getDate() && d.getMonth() === yesterday.getMonth()) {
+    return 'Hier, ' + d.getHours().toString().padStart(2, '0') + 'h' + d.getMinutes().toString().padStart(2, '0');
+  }
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function escAttr(str) {
+  if (!str) return '';
+  return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function getStatusBadge(status) {
+  switch (status) {
+    case 'APPROVED': return '<span class="badge badge-green">✓ Vérifié</span>';
+    case 'PENDING': return '<span class="badge badge-yellow">⏳ En attente</span>';
+    case 'REJECTED': return '<span class="badge badge-red">✕ Rejeté</span>';
+    case 'NOT_SUBMITTED': return '<span class="badge badge-muted">Non soumis</span>';
+    default: return '<span class="badge badge-muted">' + escHtml(status || '-') + '</span>';
+  }
+}
+
+function getPaymentStatusBadge(status) {
+  switch (status) {
+    case 'succeeded': return '<span class="badge badge-green">✓ Succès</span>';
+    case 'pending': return '<span class="badge badge-yellow">⏳ En attente</span>';
+    case 'failed': return '<span class="badge badge-red">✕ Échoué</span>';
+    default: return '<span class="badge badge-muted">' + escHtml(status || '-') + '</span>';
+  }
+}
+
+function getTradeEmoji(trade) {
+  if (!trade) return '👷';
+  const t = trade.toLowerCase();
+  if (t.includes('maçon') || t.includes('macon')) return '🧱';
+  if (t.includes('électricien') || t.includes('electricien')) return '⚡';
+  if (t.includes('plombier')) return '🔧';
+  if (t.includes('peintre')) return '🎨';
+  if (t.includes('carreleur')) return '🔲';
+  if (t.includes('menuisier')) return '🪚';
+  return '👷';
+}
+
+// ══════════════════════════════════════════════════════════════
+// SUPPORT
+// ══════════════════════════════════════════════════════════════
+let currentSupportTicketId = null;
+let supportDebounceTimer = null;
+
+const SUPPORT_CATEGORIES = { PAYMENT: '💳 Paiement', VERIFICATION: '🛡️ Vérification', DISPUTE: '⚠️ Litige', ACCOUNT: '👤 Compte', OTHER: '❓ Autre' };
+const SUPPORT_STATUS = { OPEN: { label: 'Ouvert', badge: 'badge-blue' }, IN_PROGRESS: { label: 'En cours', badge: 'badge-yellow' }, RESOLVED: { label: 'Résolu', badge: 'badge-green' }, CLOSED: { label: 'Fermé', badge: 'badge-muted' } };
+
+function debounceSupportSearch() {
+  clearTimeout(supportDebounceTimer);
+  supportDebounceTimer = setTimeout(() => loadSupportTickets(), 400);
+}
+
+async function loadSupportTickets() {
+  try {
+    const status = document.getElementById('support-status-filter').value;
+    const search = document.getElementById('support-search').value.trim();
+    let url = '/admin/support/tickets';
+    if (status) url += '?status=' + status;
+    const data = await apiCall(url);
+    const tbody = document.getElementById('support-tbody');
+    const empty = document.getElementById('support-empty');
+
+    let tickets = data.tickets || [];
+
+    // Filtrage côté client par recherche (ID, nom, email)
+    if (search) {
+      const q = search.toLowerCase();
+      tickets = tickets.filter(t => {
+        const name = ((t.user.firstName || '') + ' ' + (t.user.lastName || '')).toLowerCase();
+        const email = (t.user.email || '').toLowerCase();
+        const ticketId = (t.id || '').toLowerCase();
+        const subject = (t.subject || '').toLowerCase();
+        return ticketId.startsWith(q) || name.includes(q) || email.includes(q) || subject.includes(q);
+      });
+    }
+
+    if (tickets.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+
+    empty.style.display = 'none';
+    const openCount = tickets.filter(t => t.status === 'OPEN').length;
+    const badge = document.getElementById('badge-support');
+    if (openCount > 0) { badge.textContent = openCount; badge.style.display = ''; }
+    else { badge.style.display = 'none'; }
+
+    tbody.innerHTML = tickets.map(t => {
+      const u = t.user;
+      const name = (u.firstName || '') + ' ' + (u.lastName || '');
+      const cat = SUPPORT_CATEGORIES[t.category] || t.category;
+      const st = SUPPORT_STATUS[t.status] || SUPPORT_STATUS.OPEN;
+      const lastMsg = t.messages && t.messages[0] ? (t.messages[0].isAdmin ? '🛡️ ' : '') + t.messages[0].content.substring(0, 50) : '-';
+      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(t.id) + '" onclick="navigator.clipboard.writeText(\'' + escAttr(t.id) + '\');showToast(\'ID copié\')">#' + escHtml(t.id.substring(0, 6)) + '</span></td><td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + '</span><br><span class="badge badge-' + (u.role === 'PROFESSIONAL' ? 'orange' : 'blue') + '" style="font-size:9px;margin-top:2px;">' + (u.role === 'PROFESSIONAL' ? 'Pro' : 'Client') + '</span></td><td>' + cat + '</td><td><strong>' + escHtml(t.subject) + '</strong></td><td><span class="badge ' + st.badge + '">' + st.label + '</span></td><td style="font-size:12px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(lastMsg) + '</td><td>' + formatDate(t.updatedAt) + '</td><td class="td-actions"><button class="btn btn-view" onclick="event.stopPropagation();openSupportTicket(\'' + t.id + '\')">💬 Ouvrir</button></td></tr>';
+    }).join('');
+  } catch (err) {
+    if (err.message !== 'Unauthorized') console.error('Support error:', err);
+  }
+}
+
+async function openSupportTicket(ticketId) {
+  try {
+    currentSupportTicketId = ticketId;
+    const data = await apiCall('/admin/support/tickets/' + ticketId);
+    document.getElementById('support-modal-title').textContent = data.subject;
+
+    // Status select
+    const sel = document.getElementById('support-modal-status');
+    sel.innerHTML = Object.entries(SUPPORT_STATUS).map(([k, v]) => '<option value="' + k + '"' + (data.status === k ? ' selected' : '') + '>' + v.label + '</option>').join('');
+
+    // Messages
+    const msgEl = document.getElementById('support-modal-messages');
+    msgEl.innerHTML = data.messages.map(m => {
+      const isAdmin = m.isAdmin;
+      const align = isAdmin ? 'flex-end' : 'flex-start';
+      const bg = isAdmin ? 'rgba(244,114,11,0.15)' : 'var(--dark4)';
+      const border = isAdmin ? '1px solid rgba(244,114,11,0.3)' : '1px solid var(--border)';
+      const label = isAdmin ? '<span style="font-size:10px;color:var(--orange);font-weight:600;">🛡️ Support</span>' : '<span style="font-size:10px;color:var(--muted);">👤 ' + escHtml((data.user.firstName || '') + ' ' + (data.user.lastName || '')) + '</span>';
+      return '<div style="display:flex;justify-content:' + align + ';margin-bottom:10px;"><div style="max-width:80%;background:' + bg + ';border:' + border + ';border-radius:14px;padding:10px 14px;">' + label + '<p style="color:var(--light);font-size:13px;margin-top:4px;line-height:1.5;">' + escHtml(m.content) + '</p><span style="font-size:10px;color:var(--muted);margin-top:4px;display:block;">' + formatDate(m.createdAt) + '</span></div></div>';
+    }).join('');
+    msgEl.scrollTop = msgEl.scrollHeight;
+
+    document.getElementById('support-reply-input').value = '';
+    document.getElementById('modal-support').classList.add('show');
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function sendSupportReply() {
+  const input = document.getElementById('support-reply-input');
+  const message = input.value.trim();
+  if (!message || !currentSupportTicketId) return;
+  try {
+    await apiCall('/admin/support/tickets/' + currentSupportTicketId + '/reply', { method: 'POST', body: JSON.stringify({ message }) });
+    input.value = '';
+    showToast('Réponse envoyée');
+    openSupportTicket(currentSupportTicketId);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function changeSupportStatus() {
+  if (!currentSupportTicketId) return;
+  const status = document.getElementById('support-modal-status').value;
+  try {
+    await apiCall('/admin/support/tickets/' + currentSupportTicketId + '/status', { method: 'PATCH', body: JSON.stringify({ status }) });
+    showToast('Statut mis à jour');
+    loadSupportTickets();
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════
+(function init() {
+  if (isLoggedIn()) {
+    document.getElementById('login-overlay').classList.add('hidden');
+    // Restore admin info
+    try {
+      const user = JSON.parse(localStorage.getItem('admin_user'));
+      if (user) {
+        document.getElementById('admin-name').textContent = (user.firstName || '') + ' ' + (user.lastName || '');
+        document.getElementById('admin-email').textContent = user.email || '';
+      }
+    } catch(e) {}
+    loadDashboard();
+  }
+})();
+</script>
+</body>
+</html>

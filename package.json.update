@@ -1,0 +1,12 @@
+// 📝 À ajouter dans package.json scripts:
+
+"scripts": {
+  "dev": "nodemon src/index.js",
+  "start": "node src/index.js",
+  "migrate": "prisma migrate dev",
+  "studio": "prisma studio",
+  "test:geniuspay": "node src/utils/geniuspay-test.js"
+}
+
+// Après update, exécutez:
+// npm run test:geniuspay

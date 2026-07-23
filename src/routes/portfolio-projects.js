@@ -1,0 +1,190 @@
+const express = require('express');
+const prisma = require('../config/db');
+const { requireAuth, requireRole } = require('../middleware/auth');
+const upload = require('../config/upload');
+const { uploadBuffer } = require('../config/cloudinary');
+
+const router = express.Router();
+
+// GET /api/portfolio-projects — feed public
+router.get('/', async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, parseInt(req.query.limit) || 10);
+    const { trade, professionalId } = req.query;
+
+    const where = {};
+    if (trade) where.tradeCategory = { contains: trade, mode: 'insensitive' };
+    if (professionalId) where.professionalId = professionalId;
+
+    const [projects, total] = await Promise.all([
+      prisma.portfolioProject.findMany({
+        where,
+        include: {
+          professional: {
+            include: { user: { select: { firstName: true, lastName: true, avatarUrl: true } } },
+          },
+          images: { orderBy: { sortOrder: 'asc' }, take: 1 }, // première image en couverture
+          comments: { take: 3, orderBy: { createdAt: 'desc' }, include: { author: { select: { firstName: true, lastName: true } } } },
+          _count: { select: { comments: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.portfolioProject.count({ where }),
+    ]);
+
+    const withAverageRating = projects.map(p => {
+      const avgRating = p.comments.length > 0 ? (p.comments.reduce((sum, c) => sum + (c.rating || 0), 0) / p.comments.length) : 0;
+      return { ...p, averageRating: Math.round(avgRating * 10) / 10, _count: undefined };
+    });
+
+    res.json({ projects: withAverageRating, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/portfolio-projects/:id — détail avec tous les commentaires
+router.get('/:id', async (req, res, next) => {
+  try {
+    const project = await prisma.portfolioProject.findUnique({
+      where: { id: req.params.id },
+      include: {
+        professional: { include: { user: { select: { firstName: true, lastName: true, avatarUrl: true, email: true, city: true } } } },
+        images: { orderBy: { sortOrder: 'asc' } },
+        comments: { orderBy: { createdAt: 'desc' }, include: { author: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+      },
+    });
+
+    if (!project) return res.status(404).json({ error: 'Réalisation non trouvée' });
+
+    const avgRating = project.comments.length > 0 ? (project.comments.reduce((sum, c) => sum + (c.rating || 0), 0) / project.comments.length) : 0;
+
+    res.json({ ...project, averageRating: Math.round(avgRating * 10) / 10 });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/portfolio-projects — créer une réalisation (pro uniquement)
+router.post('/', requireAuth, requireRole('PROFESSIONAL'), upload.array('images', 10), async (req, res, next) => {
+  try {
+    const { title, description, tradeCategory } = req.body;
+    if (!title || !description) return res.status(400).json({ error: 'Titre et description requis' });
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Au moins une image requise' });
+
+    const pro = await prisma.professional.findUnique({ where: { userId: req.user.id } });
+    if (!pro) return res.status(403).json({ error: 'Profil pro non trouvé' });
+
+    const imageUrls = await Promise.all(
+      req.files.map((f) => uploadBuffer(f.buffer, 'manawa/portfolio-projects'))
+    );
+
+    const project = await prisma.portfolioProject.create({
+      data: {
+        professionalId: pro.id,
+        title,
+        description,
+        tradeCategory: tradeCategory || pro.trade,
+        images: {
+          create: imageUrls.map((imageUrl, idx) => ({ imageUrl, sortOrder: idx })),
+        },
+      },
+      include: { images: true, comments: true, professional: { include: { user: { select: { firstName: true, lastName: true } } } } },
+    });
+
+    res.status(201).json(project);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/portfolio-projects/:id — modifier une réalisation (propriétaire)
+router.patch('/:id', requireAuth, async (req, res, next) => {
+  try {
+    const { title, description, tradeCategory } = req.body;
+    const project = await prisma.portfolioProject.findUnique({
+      where: { id: req.params.id },
+      include: { professional: true },
+    });
+
+    if (!project) return res.status(404).json({ error: 'Réalisation non trouvée' });
+    if (project.professional.userId !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
+
+    const updated = await prisma.portfolioProject.update({
+      where: { id: req.params.id },
+      data: { title, description, tradeCategory, updatedAt: new Date() },
+      include: { images: true, comments: true, professional: { include: { user: { select: { firstName: true, lastName: true } } } } },
+    });
+
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/portfolio-projects/:id — supprimer une réalisation (propriétaire)
+router.delete('/:id', requireAuth, async (req, res, next) => {
+  try {
+    const project = await prisma.portfolioProject.findUnique({
+      where: { id: req.params.id },
+      include: { professional: true },
+    });
+
+    if (!project) return res.status(404).json({ error: 'Réalisation non trouvée' });
+    if (project.professional.userId !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
+
+    await prisma.portfolioProject.delete({ where: { id: req.params.id } });
+    res.json({ deleted: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/portfolio-projects/:id/comments — ajouter un commentaire
+router.post('/:id/comments', requireAuth, async (req, res, next) => {
+  try {
+    const { content, rating } = req.body;
+    if (!content || content.trim().length === 0) return res.status(400).json({ error: 'Commentaire requis' });
+    if (rating && (rating < 1 || rating > 5)) return res.status(400).json({ error: 'Note entre 1 et 5' });
+
+    const project = await prisma.portfolioProject.findUnique({ where: { id: req.params.id } });
+    if (!project) return res.status(404).json({ error: 'Réalisation non trouvée' });
+
+    const comment = await prisma.portfolioComment.create({
+      data: {
+        portfolioProjectId: req.params.id,
+        authorId: req.user.id,
+        content,
+        rating: rating ? parseInt(rating) : null,
+      },
+      include: { author: { select: { firstName: true, lastName: true, avatarUrl: true } } },
+    });
+
+    res.status(201).json(comment);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/portfolio-projects/:projectId/comments/:commentId — supprimer un commentaire
+router.delete('/:projectId/comments/:commentId', requireAuth, async (req, res, next) => {
+  try {
+    const comment = await prisma.portfolioComment.findUnique({ where: { id: req.params.commentId } });
+    if (!comment) return res.status(404).json({ error: 'Commentaire non trouvé' });
+
+    // Vérifier que c'est l'auteur ou un admin
+    if (comment.authorId !== req.user.id && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    await prisma.portfolioComment.delete({ where: { id: req.params.commentId } });
+    res.json({ deleted: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;

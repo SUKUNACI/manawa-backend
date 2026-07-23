@@ -51,7 +51,7 @@ function getMessaging() {
   if (!firebaseApp) {
     throw new Error('[Firebase] Firebase not initialized');
   }
-  return admin.messaging(firebaseApp);
+  return firebaseApp.messaging();
 }
 
 module.exports = {

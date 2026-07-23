@@ -1,4 +1,14 @@
 require('dotenv').config();
+
+const Sentry = require('@sentry/node');
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'production',
+    tracesSampleRate: 0.2,
+  });
+}
+
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
@@ -121,6 +131,11 @@ io.on('connection', (socket) => {
     }
   });
 });
+
+// Sentry error handler (doit être avant le handler custom)
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // Middleware global d'erreurs
 app.use((err, req, res, next) => {

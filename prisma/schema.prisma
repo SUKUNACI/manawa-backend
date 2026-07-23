@@ -1,0 +1,414 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String          @id @default(uuid())
+  email               String          @unique
+  passwordHash        String
+  firstName           String
+  lastName            String
+  phone               String?
+  role                UserRole
+  avatarUrl           String?
+  city                String?
+  latitude            Float?
+  longitude           Float?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  emailVerified       Boolean         @default(false)
+  emailVerifyCode     String?
+  emailVerifyExpiry   DateTime?
+  passwordResetCode   String?
+  passwordResetExpiry DateTime?
+  phoneOtpCode        String?
+  phoneOtpExpiry      DateTime?
+  phoneVerified       Boolean         @default(false)
+  suspended           Boolean         @default(false)
+  expoPushToken       String?
+  deletedAt           DateTime?
+  follows             Follow[]
+  receivedMessages    Message[]       @relation("ReceivedMessages")
+  sentMessages        Message[]       @relation("SentMessages")
+  portfolioLikes      PortfolioLike[]
+  portfolioComments   PortfolioComment[]
+  professional        Professional?
+  profileViews        ProfileView[]
+  projects            Project[]       @relation("ClientProjects")
+  reviewsWritten      Review[]        @relation("ReviewAuthor")
+  supportTickets      SupportTicket[]
+  pushTokens          PushToken[]
+  notifications       Notification[]
+}
+
+model Professional {
+  id                      String          @id @default(uuid())
+  userId                  String          @unique
+  trade                   String
+  companyName             String?
+  siret                   String?
+  description             String?
+  yearsExperience         Int?
+  hourlyRate              Float?
+  decennaleVerified       Boolean         @default(false)
+  decennaleDocUrl         String?
+  rgeLabel                Boolean         @default(false)
+  qualibatNumber          String?
+  verifiedByAdmin         Boolean         @default(false)
+  interventionRadiusKm    Int             @default(30)
+  averageRating           Float           @default(0)
+  reviewCount             Int             @default(0)
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+  idDocumentUrl           String?
+  identityStatus          String          @default("NOT_SUBMITTED")
+  selfieUrl               String?
+  accountType             AccountType     @default(INDEPENDENT)
+  cancelledMissionsCount  Int             @default(0)
+  completedMissionsCount  Int             @default(0)
+  complaintsCount         Int             @default(0)
+  employeeCount           Int?
+  lastExperienceUpdate    DateTime?
+  idDocumentVersoUrl      String?
+  trades                  String[]        @default([])
+  identityRejectionReason String?
+  companyCode             String?         @unique
+  companyMembers          CompanyMember[] @relation("CompanyMembers")
+  memberOf                CompanyMember?  @relation("MemberOf")
+  followers               Follow[]
+  portfolio               PortfolioItem[]
+  portfolioProjects       PortfolioProject[] @relation("PortfolioProjects")
+  user                    User            @relation(fields: [userId], references: [id])
+  profileViews            ProfileView[]
+  quotes                  Quote[]
+  reviews                 Review[]        @relation("ReviewedProfessional")
+  subscription            Subscription?
+}
+
+model PortfolioItem {
+  id             String          @id @default(uuid())
+  professionalId String
+  imageUrl       String
+  caption        String?
+  createdAt      DateTime        @default(now())
+  professional   Professional    @relation(fields: [professionalId], references: [id])
+  likes          PortfolioLike[]
+}
+
+model PortfolioProject {
+  id             String                 @id @default(uuid())
+  professionalId String
+  title          String
+  description    String
+  tradeCategory  String
+  images         PortfolioProjectImage[]
+  comments       PortfolioComment[]
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  professional   Professional           @relation("PortfolioProjects", fields: [professionalId], references: [id])
+
+  @@index([professionalId, createdAt])
+}
+
+model PortfolioProjectImage {
+  id                 String           @id @default(uuid())
+  portfolioProjectId String
+  imageUrl           String
+  caption            String?
+  sortOrder          Int              @default(0)
+  createdAt          DateTime         @default(now())
+  portfolioProject   PortfolioProject @relation(fields: [portfolioProjectId], references: [id], onDelete: Cascade)
+
+  @@index([portfolioProjectId])
+}
+
+model PortfolioComment {
+  id                 String           @id @default(uuid())
+  portfolioProjectId String
+  authorId           String
+  content            String
+  rating             Int?
+  createdAt          DateTime         @default(now())
+  portfolioProject   PortfolioProject @relation(fields: [portfolioProjectId], references: [id], onDelete: Cascade)
+  author             User             @relation(fields: [authorId], references: [id])
+
+  @@index([portfolioProjectId, createdAt])
+}
+
+model PortfolioLike {
+  id              String        @id @default(uuid())
+  userId          String
+  portfolioItemId String
+  createdAt       DateTime      @default(now())
+  portfolioItem   PortfolioItem @relation(fields: [portfolioItemId], references: [id])
+  user            User          @relation(fields: [userId], references: [id])
+
+  @@unique([userId, portfolioItemId])
+}
+
+model ProfileView {
+  id             String       @id @default(uuid())
+  viewerId       String
+  professionalId String
+  createdAt      DateTime     @default(now())
+  professional   Professional @relation(fields: [professionalId], references: [id])
+  viewer         User         @relation(fields: [viewerId], references: [id])
+}
+
+model Follow {
+  id             String       @id @default(uuid())
+  followerId     String
+  professionalId String
+  createdAt      DateTime     @default(now())
+  follower       User         @relation(fields: [followerId], references: [id])
+  professional   Professional @relation(fields: [professionalId], references: [id])
+
+  @@unique([followerId, professionalId])
+}
+
+model Project {
+  id                        String         @id @default(uuid())
+  clientId                  String
+  title                     String
+  description               String
+  tradeNeeded               String
+  budgetMin                 Float?
+  budgetMax                 Float?
+  city                      String
+  latitude                  Float?
+  longitude                 Float?
+  status                    ProjectStatus  @default(OPEN)
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+  clientConfirmedCompletion Boolean        @default(false)
+  proConfirmedCompletion    Boolean        @default(false)
+  client                    User           @relation("ClientProjects", fields: [clientId], references: [id])
+  photos                    ProjectPhoto[]
+  quotes                    Quote[]
+  review                    Review?
+}
+
+model ProjectPhoto {
+  id        String  @id @default(uuid())
+  projectId String
+  imageUrl  String
+  project   Project @relation(fields: [projectId], references: [id])
+}
+
+model Quote {
+  id             String       @id @default(uuid())
+  projectId      String
+  professionalId String
+  amount         Float
+  description    String
+  status         QuoteStatus  @default(PENDING)
+  pdfUrl         String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  expiresAt      DateTime?
+  mode           QuoteMode    @default(SIMPLE)
+  parentQuoteId  String?
+  validityDays   Int          @default(15)
+  version        Int          @default(1)
+  payment        Payment?
+  parentQuote    Quote?       @relation("QuoteRevisions", fields: [parentQuoteId], references: [id])
+  revisions      Quote[]      @relation("QuoteRevisions")
+  professional   Professional @relation(fields: [professionalId], references: [id])
+  project        Project      @relation(fields: [projectId], references: [id])
+  items          QuoteItem[]
+}
+
+model QuoteItem {
+  id        String            @id @default(uuid())
+  quoteId   String
+  category  QuoteItemCategory @default(OTHER)
+  label     String
+  quantity  Float             @default(1)
+  unit      String?
+  unitPrice Float
+  total     Float
+  sortOrder Int               @default(0)
+  createdAt DateTime          @default(now())
+  quote     Quote             @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+}
+
+model Subscription {
+  id             String       @id @default(uuid())
+  professionalId String       @unique
+  status         String       @default("INACTIVE")
+  transactionId  String?
+  startedAt      DateTime?
+  expiresAt      DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  professional   Professional @relation(fields: [professionalId], references: [id])
+}
+
+model Payment {
+  id              String   @id @default(uuid())
+  quoteId         String   @unique
+  geniuspayRef    String?  // Référence GeniusPay (ex: MTX-XXXXXXXX)
+  amount          Float
+  status          String   // pending | succeeded | failed
+  isDeposit       Boolean  @default(true)
+  fees            Float    @default(0) // Frais GeniusPay
+  netAmount       Float?   // Montant net (amount - fees)
+  paymentMethod   String?  // wave, orange_money, mtn_money, card, etc.
+  metadata        String?  // JSON stringifié pour métadonnées additionnelles
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  completedAt     DateTime? // Date de confirmation du paiement
+  quote           Quote    @relation(fields: [quoteId], references: [id])
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  senderId   String
+  receiverId String
+  content    String
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
+}
+
+model Review {
+  id             String       @id @default(uuid())
+  authorId       String
+  professionalId String
+  rating         Int
+  comment        String?
+  createdAt      DateTime     @default(now())
+  projectId      String?      @unique
+  author         User         @relation("ReviewAuthor", fields: [authorId], references: [id])
+  professional   Professional @relation("ReviewedProfessional", fields: [professionalId], references: [id])
+  project        Project?     @relation(fields: [projectId], references: [id])
+}
+
+model SupportTicket {
+  id        String           @id @default(uuid())
+  userId    String
+  category  String
+  subject   String
+  status    String           @default("OPEN")
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  messages  SupportMessage[]
+  user      User             @relation(fields: [userId], references: [id])
+}
+
+model SupportMessage {
+  id        String        @id @default(uuid())
+  ticketId  String
+  senderId  String
+  isAdmin   Boolean       @default(false)
+  content   String
+  createdAt DateTime      @default(now())
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id])
+}
+
+model CompanyMember {
+  id        String       @id @default(uuid())
+  companyId String
+  memberId  String       @unique
+  joinedAt  DateTime     @default(now())
+  status    String       @default("ACTIVE")
+  company   Professional @relation("CompanyMembers", fields: [companyId], references: [id])
+  member    Professional @relation("MemberOf", fields: [memberId], references: [id])
+
+  @@unique([companyId, memberId])
+}
+
+enum UserRole {
+  CLIENT
+  PROFESSIONAL
+  ADMIN
+}
+
+enum ProjectStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum QuoteStatus {
+  PENDING
+  ACCEPTED
+  REFUSED
+  EXPIRED
+  REVISED
+}
+
+enum QuoteMode {
+  SIMPLE
+  DETAILED
+}
+
+enum QuoteItemCategory {
+  LABOUR
+  MATERIALS
+  OTHER
+}
+
+enum AccountType {
+  INDEPENDENT
+  ENTREPRISE
+}
+
+model PushToken {
+  id        String    @id @default(uuid())
+  userId    String
+  token     String    @unique
+  platform  String    // 'ANDROID' | 'iOS'
+  type      String    // 'FCM' | 'APNs' | 'EXPO'
+  deviceId  String?
+  isActive  Boolean   @default(true)
+  lastUsed  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, token])
+  @@index([userId])
+  @@index([platform])
+  @@index([isActive])
+}
+
+model PushTokenMigrationLog {
+  id        String    @id @default(uuid())
+  userId    String
+  fromToken String?
+  toToken   String?
+  platform  String
+  status    String    // 'PENDING' | 'SUCCESS' | 'FAILED'
+  reason    String?
+  createdAt DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String?
+  title     String
+  body      String?
+  message   String?
+  data      Json?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}

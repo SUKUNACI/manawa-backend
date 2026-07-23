@@ -51,7 +51,8 @@ function getMessaging() {
   if (!firebaseApp) {
     throw new Error('[Firebase] Firebase not initialized');
   }
-  return firebaseApp.messaging();
+  const { getMessaging: fcmGetMessaging } = require('firebase-admin/messaging');
+  return fcmGetMessaging(firebaseApp);
 }
 
 module.exports = {

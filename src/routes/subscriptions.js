@@ -10,8 +10,14 @@ const CINETPAY_CHECK_URL = 'https://api-checkout.cinetpay.com/v2/payment/check';
 const PREMIUM_PRICE_FCFA = 5000;
 const isCinetPayConfigured = !!(process.env.CINETPAY_API_KEY && process.env.CINETPAY_SITE_ID);
 
-function isPremiumActive(subscription) {
-  return !!subscription && subscription.status === 'ACTIVE' && subscription.expiresAt && new Date(subscription.expiresAt) > new Date();
+function isPremiumActive(subscription, pro) {
+  const paidPremium = !!subscription && subscription.status === 'ACTIVE' && subscription.expiresAt && new Date(subscription.expiresAt) > new Date();
+  const trialActive = !!pro?.trialEndsAt && new Date(pro.trialEndsAt) > new Date();
+  return paidPremium || trialActive;
+}
+
+function isOnTrial(pro) {
+  return !!pro?.trialEndsAt && new Date(pro.trialEndsAt) > new Date();
 }
 
 const PREMIUM_BENEFITS = [
@@ -116,4 +122,5 @@ router.get('/return', (req, res) => {
 
 module.exports = router;
 module.exports.isPremiumActive = isPremiumActive;
+module.exports.isOnTrial = isOnTrial;
 module.exports.PREMIUM_PRICE_FCFA = PREMIUM_PRICE_FCFA;

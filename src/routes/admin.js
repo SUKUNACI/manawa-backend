@@ -563,11 +563,15 @@ router.patch('/professionals/:id/verify', async (req, res, next) => {
     const professional = await prisma.professional.findUnique({ where: { id: req.params.id } });
     if (!professional) return res.status(404).json({ error: 'Professionnel non trouvé' });
 
+    const trialEndsAt = new Date();
+    trialEndsAt.setMonth(trialEndsAt.getMonth() + 3);
+
     const updated = await prisma.professional.update({
       where: { id: req.params.id },
       data: {
         identityStatus: 'APPROVED',
         verifiedByAdmin: true,
+        trialEndsAt: professional.trialEndsAt ? undefined : trialEndsAt,
       },
       include: { user: { select: { firstName: true, lastName: true, email: true } } },
     });

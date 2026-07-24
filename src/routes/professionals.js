@@ -4,7 +4,7 @@ const upload = require('../config/upload');
 const { uploadBuffer } = require('../config/cloudinary');
 const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const { computeTrustScore, getTrustScoreBreakdown } = require('../utils/trustScore');
-const { isPremiumActive, PREMIUM_PRICE_FCFA } = require('./subscriptions');
+const { isPremiumActive, isOnTrial, PREMIUM_PRICE_FCFA } = require('./subscriptions');
 
 const router = express.Router();
 
@@ -69,7 +69,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
 
     const withScores = result.map((p) => {
       const extras = { quoteSentCount: qSentMap[p.id] || 0, quoteAcceptedCount: qAccMap[p.id] || 0, badReviewCount: badRevMap[p.id] || 0 };
-      return { ...p, trustScore: computeTrustScore(p, extras), isPremium: isPremiumActive(p.subscription), subscription: undefined };
+      return { ...p, trustScore: computeTrustScore(p, extras), isPremium: isPremiumActive(p.subscription, p), isOnTrial: isOnTrial(p), subscription: undefined };
     });
     withScores.sort((a, b) => (b.isPremium - a.isPremium) || (b.averageRating - a.averageRating));
 
@@ -142,7 +142,7 @@ router.patch('/me', requireAuth, requireRole('PROFESSIONAL'), async (req, res, n
     const { trade, trades, companyName, siret, description, yearsExperience, hourlyRate, interventionRadiusKm, qualibatNumber } = req.body;
 
     const current = await prisma.professional.findUnique({ where: { userId: req.user.id }, include: { subscription: true } });
-    const premium = isPremiumActive(current.subscription);
+    const premium = isPremiumActive(current.subscription, current);
 
     const data = { trade, companyName, siret, description, hourlyRate, interventionRadiusKm, qualibatNumber };
 
@@ -181,7 +181,7 @@ router.post('/me/portfolio', requireAuth, requireRole('PROFESSIONAL'), upload.si
     if (!req.file) return res.status(400).json({ error: 'Photo requise' });
     const pro = await prisma.professional.findUnique({ where: { userId: req.user.id }, include: { portfolio: true, subscription: true } });
 
-    if (!isPremiumActive(pro.subscription) && pro.portfolio.length >= 6) {
+    if (!isPremiumActive(pro.subscription, pro) && pro.portfolio.length >= 6) {
       return res.status(403).json({ error: 'Limite de 6 photos atteinte pour les comptes gratuits. Passez Premium pour un portfolio illimité.' });
     }
 
@@ -284,7 +284,7 @@ router.get('/me/views', requireAuth, requireRole('PROFESSIONAL'), async (req, re
       }
     }
 
-    const response = { totalViews: views.length, views: Array.from(byViewer.values()), isPremium: isPremiumActive(pro.subscription) };
+    const response = { totalViews: views.length, views: Array.from(byViewer.values()), isPremium: isPremiumActive(pro.subscription, pro) };
 
     if (response.isPremium) {
       const weeks = {};
@@ -525,7 +525,7 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
       }
     }
 
-    res.json({ ...pro, portfolio, isFollowing, followerCount: pro.followers.length, followers: undefined, trustScore: computeTrustScore(pro, extras), trustScoreBreakdown: getTrustScoreBreakdown(pro, extras), isPremium: isPremiumActive(pro.subscription), subscription: undefined });
+    res.json({ ...pro, portfolio, isFollowing, followerCount: pro.followers.length, followers: undefined, trustScore: computeTrustScore(pro, extras), trustScoreBreakdown: getTrustScoreBreakdown(pro, extras), isPremium: isPremiumActive(pro.subscription, pro), isOnTrial: isOnTrial(pro), trialEndsAt: pro.trialEndsAt, subscription: undefined });
   } catch (err) {
     next(err);
   }

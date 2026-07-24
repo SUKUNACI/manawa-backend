@@ -32,7 +32,9 @@ router.get('/me', requireAuth, requireRole('PROFESSIONAL'), async (req, res, nex
   try {
     const pro = await prisma.professional.findUnique({ where: { userId: req.user.id }, include: { subscription: true } });
     res.json({
-      isPremium: isPremiumActive(pro.subscription),
+      isPremium: isPremiumActive(pro.subscription, pro),
+      isOnTrial: isOnTrial(pro),
+      trialEndsAt: pro.trialEndsAt || null,
       status: pro.subscription?.status || 'INACTIVE',
       expiresAt: pro.subscription?.expiresAt || null,
       price: PREMIUM_PRICE_FCFA,

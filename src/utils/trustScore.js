@@ -38,7 +38,6 @@ function computeTrustScore(pro, extras = {}) {
   if (pro.user?.emailVerified) score += BONUS.EMAIL_VERIFIED;
   if (pro.verifiedByAdmin) score += BONUS.IDENTITY_VERIFIED;
   if ((pro.portfolio?.length || 0) >= 3) score += BONUS.PORTFOLIO_MIN3;
-  if (pro.user?.phoneVerified) score += BONUS.PHONE_VERIFIED;
   if ((pro.description?.length || 0) > 50) score += BONUS.DESCRIPTION;
   if (pro.decennaleVerified) score += BONUS.DECENNALE;
 
@@ -92,7 +91,6 @@ function getTrustScoreBreakdown(pro, extras = {}) {
   if (pro.user?.emailVerified) breakdown.bonus.push({ label: 'Email vérifié', points: BONUS.EMAIL_VERIFIED });
   if (pro.verifiedByAdmin) breakdown.bonus.push({ label: 'Identité vérifiée', points: BONUS.IDENTITY_VERIFIED });
   if ((pro.portfolio?.length || 0) >= 3) breakdown.bonus.push({ label: 'Portfolio (3+ photos)', points: BONUS.PORTFOLIO_MIN3 });
-  if (pro.user?.phoneVerified) breakdown.bonus.push({ label: 'Téléphone vérifié', points: BONUS.PHONE_VERIFIED });
   if ((pro.description?.length || 0) > 50) breakdown.bonus.push({ label: 'Description complète', points: BONUS.DESCRIPTION });
   if (pro.decennaleVerified) breakdown.bonus.push({ label: 'Assurance décennale', points: BONUS.DECENNALE });
 

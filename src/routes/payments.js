@@ -23,6 +23,17 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
       console.log('[Payment] quote not accepted, status:', quote?.status);
       return res.status(400).json({ error: 'Ce devis doit être accepté avant paiement' });
     }
+
+    // Vérifier si un paiement succeeded existe déjà pour ce devis/type
+    const existingPayment = await prisma.payment.findUnique({ where: { quoteId } });
+    if (existingPayment) {
+      if (existingPayment.status === 'succeeded') {
+        return res.status(400).json({ error: 'Ce paiement a déjà été effectué avec succès.' });
+      }
+      if (existingPayment.status === 'pending' && existingPayment.isDeposit === isDeposit) {
+        return res.status(400).json({ error: 'Un paiement est déjà en cours pour ce devis. Vérifiez votre application de paiement.' });
+      }
+    }
     if (quote.project.clientId !== req.user.id) {
       return res.status(403).json({ error: 'Accès refusé' });
     }

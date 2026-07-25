@@ -42,6 +42,7 @@ const allowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',')
   : ['http://localhost:8081', 'http://localhost:19006'];
 
+app.set('trust proxy', 1);
 app.use(cors({ origin: allowedOrigins }));
 
 // Initialize Firebase

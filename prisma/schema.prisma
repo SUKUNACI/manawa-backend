@@ -142,16 +142,20 @@ model PortfolioProjectImage {
 }
 
 model PortfolioComment {
-  id                 String           @id @default(uuid())
+  id                 String             @id @default(uuid())
   portfolioProjectId String
   authorId           String
   content            String
   rating             Int?
-  createdAt          DateTime         @default(now())
-  portfolioProject   PortfolioProject @relation(fields: [portfolioProjectId], references: [id], onDelete: Cascade)
-  author             User             @relation(fields: [authorId], references: [id])
+  parentId           String?
+  createdAt          DateTime           @default(now())
+  portfolioProject   PortfolioProject   @relation(fields: [portfolioProjectId], references: [id], onDelete: Cascade)
+  author             User               @relation(fields: [authorId], references: [id])
+  parent             PortfolioComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies            PortfolioComment[] @relation("CommentReplies")
 
   @@index([portfolioProjectId, createdAt])
+  @@index([parentId])
 }
 
 model PortfolioLike {

@@ -269,23 +269,39 @@ model Subscription {
 }
 
 model Payment {
-  id              String   @id @default(uuid())
+  id              String             @id @default(uuid())
   quoteId         String
   geniuspayRef    String?
-  idempotencyKey  String?  @unique
+  idempotencyKey  String?            @unique
   amount          Float
-  status          String   // pending | succeeded | failed
-  isDeposit       Boolean  @default(true)
-  fees            Float    @default(0)
+  status          String             // pending | succeeded | failed
+  isDeposit       Boolean            @default(true)
+  fees            Float              @default(0)
   netAmount       Float?
   paymentMethod   String?
   metadata        String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
   completedAt     DateTime?
-  quote           Quote    @relation(fields: [quoteId], references: [id])
+  quote           Quote              @relation(fields: [quoteId], references: [id])
+  auditLogs       PaymentAuditLog[]
 
   @@unique([quoteId, isDeposit])
+}
+
+model PaymentAuditLog {
+  id          String   @id @default(uuid())
+  paymentId   String
+  fromStatus  String   // statut avant le changement
+  toStatus    String   // statut après le changement
+  reason      String?  // webhook | recheck | cron | manual | amount_mismatch
+  triggeredBy String?  // userId si action manuelle, "system" sinon
+  ipAddress   String?
+  metadata    String?  // JSON — données brutes GeniusPay ou info supplémentaire
+  createdAt   DateTime @default(now())
+  payment     Payment  @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
 }
 
 model Message {

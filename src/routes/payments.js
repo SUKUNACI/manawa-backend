@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const geniuspay = require('../utils/geniuspay');
+const { logPaymentStatus } = require('../utils/paymentAudit');
 
 const router = express.Router();
 
@@ -20,7 +21,7 @@ const paymentRateLimit = rateLimit({
 
 // Vérifie le montant reçu vs attendu (±1 FCFA pour les arrondis)
 // Retourne true si le montant est valide, false sinon
-async function verifyAndUpdatePayment(payment, gpData) {
+async function verifyAndUpdatePayment(payment, gpData, reason = 'recheck') {
   const receivedAmount = gpData?.amount || gpData?.paid_amount;
   if (receivedAmount !== undefined && Math.abs(receivedAmount - payment.amount) > 1) {
     console.error(
@@ -30,11 +31,24 @@ async function verifyAndUpdatePayment(payment, gpData) {
       where: { id: payment.id },
       data: { status: 'failed', metadata: JSON.stringify({ reason: 'amount_mismatch', expected: payment.amount, received: receivedAmount }) },
     });
+    await logPaymentStatus({
+      paymentId: payment.id,
+      fromStatus: payment.status,
+      toStatus: 'failed',
+      reason: 'amount_mismatch',
+      metadata: { expected: payment.amount, received: receivedAmount },
+    });
     return false;
   }
   await prisma.payment.update({
     where: { id: payment.id },
     data: { status: 'succeeded', completedAt: new Date() },
+  });
+  await logPaymentStatus({
+    paymentId: payment.id,
+    fromStatus: payment.status,
+    toStatus: 'succeeded',
+    reason,
   });
   return true;
 }
@@ -193,15 +207,20 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
       });
 
       if (payment) {
-        // Vérification du montant : le montant reçu doit correspondre au montant attendu (±1 FCFA)
         const receivedAmount = data.amount || data.paid_amount;
         if (receivedAmount !== undefined && Math.abs(receivedAmount - payment.amount) > 1) {
-          console.error(
-            `[Payment] MONTANT INCORRECT — ref: ${reference}, attendu: ${payment.amount}, reçu: ${receivedAmount}. Paiement rejeté.`
-          );
+          console.error(`[Payment] MONTANT INCORRECT — ref: ${reference}, attendu: ${payment.amount}, reçu: ${receivedAmount}.`);
           await prisma.payment.update({
             where: { id: payment.id },
             data: { status: 'failed', metadata: JSON.stringify({ reason: 'amount_mismatch', expected: payment.amount, received: receivedAmount }) },
+          });
+          await logPaymentStatus({
+            paymentId: payment.id,
+            fromStatus: payment.status,
+            toStatus: 'failed',
+            reason: 'amount_mismatch',
+            ipAddress: req.ip,
+            metadata: { expected: payment.amount, received: receivedAmount, ref: reference },
           });
           return res.status(400).json({ error: 'Amount mismatch' });
         }
@@ -216,8 +235,15 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
             paymentMethod: data.payment_method || payment.paymentMethod,
           },
         });
+        await logPaymentStatus({
+          paymentId: payment.id,
+          fromStatus: payment.status,
+          toStatus: 'succeeded',
+          reason: 'webhook',
+          ipAddress: req.ip,
+          metadata: { ref: reference, method: data.payment_method },
+        });
 
-        // Si c'est le solde, marquer le devis comme complété
         if (!payment.isDeposit) {
           await prisma.quote.update({
             where: { id: payment.quoteId },
@@ -229,11 +255,18 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
       res.json({ success: true, message: 'Payment processed' });
     } else if (event === 'payment.failed') {
       const reference = data.reference;
-      await prisma.payment.updateMany({
-        where: { geniuspayRef: reference },
-        data: { status: 'failed' },
-      });
-
+      const failedPayment = await prisma.payment.findUnique({ where: { geniuspayRef: reference } });
+      if (failedPayment) {
+        await prisma.payment.update({ where: { id: failedPayment.id }, data: { status: 'failed' } });
+        await logPaymentStatus({
+          paymentId: failedPayment.id,
+          fromStatus: failedPayment.status,
+          toStatus: 'failed',
+          reason: 'webhook',
+          ipAddress: req.ip,
+          metadata: { ref: reference },
+        });
+      }
       res.json({ success: true, message: 'Payment failure recorded' });
     } else {
       res.json({ success: true, message: 'Event processed' });

@@ -463,6 +463,76 @@ router.get('/check/:reference', requireAuth, async (req, res, next) => {
   }
 });
 
+// GET /api/payments/history — historique paiements (client, pro, admin)
+router.get('/history', requireAuth, async (req, res, next) => {
+  try {
+    const { role, id: userId } = req.user;
+    let payments;
+
+    if (role === 'ADMIN') {
+      payments = await prisma.payment.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        include: {
+          quote: {
+            include: {
+              project: { select: { title: true } },
+              professional: { include: { user: { select: { firstName: true, lastName: true } } } },
+            },
+          },
+        },
+      });
+    } else if (role === 'CLIENT') {
+      payments = await prisma.payment.findMany({
+        where: { quote: { project: { clientId: userId } } },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          quote: {
+            include: {
+              project: { select: { title: true } },
+              professional: { include: { user: { select: { firstName: true, lastName: true } } } },
+            },
+          },
+        },
+      });
+    } else if (role === 'PROFESSIONAL') {
+      const pro = await prisma.professional.findUnique({ where: { userId } });
+      if (!pro) return res.json([]);
+      payments = await prisma.payment.findMany({
+        where: { quote: { professionalId: pro.id } },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          quote: {
+            include: {
+              project: { select: { title: true } },
+            },
+          },
+        },
+      });
+    } else {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    const result = payments.map(p => ({
+      id: p.id,
+      amount: p.amount,
+      status: p.status,
+      isDeposit: p.isDeposit,
+      paymentMethod: p.paymentMethod,
+      createdAt: p.createdAt,
+      completedAt: p.completedAt,
+      projectTitle: p.quote.project.title,
+      proName: p.quote.professional?.user
+        ? `${p.quote.professional.user.firstName} ${p.quote.professional.user.lastName}`
+        : null,
+    }));
+
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/payments/providers (list MMO providers)
 router.get('/providers', async (req, res, next) => {
   try {

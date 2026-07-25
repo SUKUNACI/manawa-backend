@@ -206,6 +206,7 @@ router.delete('/me/portfolio/:itemId', requireAuth, requireRole('PROFESSIONAL'),
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
+    await prisma.portfolioLike.deleteMany({ where: { portfolioItemId: req.params.itemId } });
     await prisma.portfolioItem.delete({ where: { id: req.params.itemId } });
     res.json({ deleted: true });
   } catch (err) {

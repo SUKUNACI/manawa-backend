@@ -73,8 +73,9 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
       amount,
     });
   } catch (err) {
-    console.error('Payment creation error:', err.message);
-    next(err);
+    const detail = err.response?.data || err.message;
+    console.error('Payment creation error:', JSON.stringify(detail));
+    res.status(500).json({ error: 'Erreur lors de la création du paiement', detail });
   }
 });
 

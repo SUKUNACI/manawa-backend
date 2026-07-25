@@ -146,6 +146,21 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), paymentRateL
 // POST /api/payments/webhooks/geniuspay
 router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
   try {
+    // Whitelist IP GeniusPay — activer en ajoutant GENIUSPAY_WEBHOOK_IPS dans Railway
+    // Format : "1.2.3.4,5.6.7.8" (IPs séparées par virgule, à demander à GeniusPay)
+    const allowedIPs = process.env.GENIUSPAY_WEBHOOK_IPS
+      ? process.env.GENIUSPAY_WEBHOOK_IPS.split(',').map(ip => ip.trim())
+      : [];
+
+    if (allowedIPs.length > 0) {
+      const requestIP = req.ip || req.socket?.remoteAddress || '';
+      const normalizedIP = requestIP.replace('::ffff:', ''); // normaliser IPv4-mapped IPv6
+      if (!allowedIPs.includes(normalizedIP)) {
+        console.warn(`[Webhook] IP non autorisée : ${normalizedIP}`);
+        return res.status(403).json({ error: 'IP not allowed' });
+      }
+    }
+
     const signature = req.header('X-Webhook-Signature');
     const timestamp = req.header('X-Webhook-Timestamp');
     const event = req.header('X-Webhook-Event');

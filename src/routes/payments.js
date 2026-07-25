@@ -206,7 +206,9 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
         include: { quote: { include: { project: true } } },
       });
 
-      if (payment) {
+      if (payment && payment.status !== 'succeeded') {
+        // Si déjà succeeded (double webhook) → ignorer silencieusement
+        // Si failed (cron a expiré mais webhook arrive quand même) → on corrige en succeeded
         const receivedAmount = data.amount || data.paid_amount;
         if (receivedAmount !== undefined && Math.abs(receivedAmount - payment.amount) > 1) {
           console.error(`[Payment] MONTANT INCORRECT — ref: ${reference}, attendu: ${payment.amount}, reçu: ${receivedAmount}.`);

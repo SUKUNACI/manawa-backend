@@ -5,8 +5,44 @@ const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const geniuspay = require('../utils/geniuspay');
 const { logPaymentStatus } = require('../utils/paymentAudit');
+const { sendPushNotification } = require('../config/pushNotifications');
 
 const router = express.Router();
+
+// Notifie le pro quand un paiement est confirmé
+async function notifyProPaymentReceived(paymentId) {
+  try {
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: {
+        quote: {
+          include: {
+            project: true,
+            professional: { include: { user: true } },
+          },
+        },
+      },
+    });
+    if (!payment) return;
+
+    const pro = payment.quote.professional;
+    const projectTitle = payment.quote.project.title;
+    const amount = payment.amount.toLocaleString('fr-FR');
+    const type = payment.isDeposit ? 'acompte (30%)' : 'solde (70%)';
+    const title = payment.isDeposit ? '💰 Acompte reçu !' : '💰 Solde reçu !';
+    const body = `Le client a payé l'${type} de ${amount} FCFA pour "${projectTitle}".`;
+
+    sendPushNotification(pro.userId, title, body, {
+      type: 'payment_received',
+      paymentId,
+      quoteId: payment.quoteId,
+      projectId: payment.quote.projectId,
+      isDeposit: payment.isDeposit,
+    });
+  } catch (err) {
+    console.error('[Payment] Erreur notification pro:', err.message);
+  }
+}
 
 // 5 tentatives de paiement max par utilisateur par heure
 const paymentRateLimit = rateLimit({
@@ -50,6 +86,7 @@ async function verifyAndUpdatePayment(payment, gpData, reason = 'recheck') {
     toStatus: 'succeeded',
     reason,
   });
+  notifyProPaymentReceived(payment.id);
   return true;
 }
 
@@ -245,6 +282,7 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
           ipAddress: req.ip,
           metadata: { ref: reference, method: data.payment_method },
         });
+        notifyProPaymentReceived(payment.id);
 
         if (!payment.isDeposit) {
           await prisma.quote.update({

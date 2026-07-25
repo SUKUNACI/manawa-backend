@@ -36,6 +36,7 @@ model User {
   receivedMessages    Message[]       @relation("ReceivedMessages")
   sentMessages        Message[]       @relation("SentMessages")
   portfolioLikes      PortfolioLike[]
+  portfolioProjectLikes PortfolioProjectLike[]
   portfolioComments   PortfolioComment[]
   professional        Professional?
   profileViews        ProfileView[]
@@ -109,11 +110,23 @@ model PortfolioProject {
   tradeCategory  String
   images         PortfolioProjectImage[]
   comments       PortfolioComment[]
+  likes          PortfolioProjectLike[]
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
   professional   Professional           @relation("PortfolioProjects", fields: [professionalId], references: [id])
 
   @@index([professionalId, createdAt])
+}
+
+model PortfolioProjectLike {
+  id                 String           @id @default(uuid())
+  userId             String
+  portfolioProjectId String
+  createdAt          DateTime         @default(now())
+  user               User             @relation(fields: [userId], references: [id])
+  portfolioProject   PortfolioProject @relation(fields: [portfolioProjectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, portfolioProjectId])
 }
 
 model PortfolioProjectImage {

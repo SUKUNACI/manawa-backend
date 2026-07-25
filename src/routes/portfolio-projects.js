@@ -13,6 +13,18 @@ router.get('/', async (req, res, next) => {
     const limit = Math.min(50, parseInt(req.query.limit) || 10);
     const { trade, professionalId } = req.query;
 
+    // userId optionnel pour savoir si l'utilisateur a liké
+    const authHeader = req.headers.authorization;
+    let userId = null;
+    if (authHeader) {
+      try {
+        const jwt = require('jsonwebtoken');
+        const token = authHeader.replace('Bearer ', '');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        userId = decoded.userId;
+      } catch {}
+    }
+
     const where = {};
     if (trade) where.tradeCategory = { contains: trade, mode: 'insensitive' };
     if (professionalId) where.professionalId = professionalId;
@@ -22,11 +34,15 @@ router.get('/', async (req, res, next) => {
         where,
         include: {
           professional: {
-            include: { user: { select: { firstName: true, lastName: true, avatarUrl: true } } },
+            include: { user: { select: { firstName: true, lastName: true, avatarUrl: true, city: true } } },
           },
-          images: { orderBy: { sortOrder: 'asc' }, take: 1 }, // première image en couverture
-          comments: { take: 3, orderBy: { createdAt: 'desc' }, include: { author: { select: { firstName: true, lastName: true } } } },
-          _count: { select: { comments: true } },
+          images: { orderBy: { sortOrder: 'asc' } },
+          comments: {
+            orderBy: { createdAt: 'desc' },
+            include: { author: { select: { firstName: true, lastName: true, avatarUrl: true } } },
+          },
+          _count: { select: { comments: true, likes: true } },
+          likes: userId ? { where: { userId }, select: { id: true } } : false,
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -35,12 +51,21 @@ router.get('/', async (req, res, next) => {
       prisma.portfolioProject.count({ where }),
     ]);
 
-    const withAverageRating = projects.map(p => {
-      const avgRating = p.comments.length > 0 ? (p.comments.reduce((sum, c) => sum + (c.rating || 0), 0) / p.comments.length) : 0;
-      return { ...p, averageRating: Math.round(avgRating * 10) / 10, _count: undefined };
+    const result = projects.map(p => {
+      const ratings = p.comments.filter(c => c.rating).map(c => c.rating);
+      const avgRating = ratings.length > 0 ? Math.round((ratings.reduce((s, r) => s + r, 0) / ratings.length) * 10) / 10 : 0;
+      return {
+        ...p,
+        averageRating: avgRating,
+        likeCount: p._count.likes,
+        commentCount: p._count.comments,
+        likedByMe: userId ? (p.likes?.length > 0) : false,
+        likes: undefined,
+        _count: undefined,
+      };
     });
 
-    res.json({ projects: withAverageRating, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+    res.json({ projects: result, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
   } catch (err) {
     next(err);
   }
@@ -141,6 +166,23 @@ router.delete('/:id', requireAuth, async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+// POST /api/portfolio-projects/:id/like — liker / unliker
+router.post('/:id/like', requireAuth, async (req, res, next) => {
+  try {
+    const existing = await prisma.portfolioProjectLike.findUnique({
+      where: { userId_portfolioProjectId: { userId: req.user.id, portfolioProjectId: req.params.id } },
+    });
+    if (existing) {
+      await prisma.portfolioProjectLike.delete({ where: { id: existing.id } });
+      return res.json({ liked: false });
+    }
+    await prisma.portfolioProjectLike.create({
+      data: { userId: req.user.id, portfolioProjectId: req.params.id },
+    });
+    res.json({ liked: true });
+  } catch (err) { next(err); }
 });
 
 // POST /api/portfolio-projects/:id/comments — ajouter un commentaire

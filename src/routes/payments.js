@@ -44,9 +44,10 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
       errorUrl: `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/payments/error`,
     });
 
-    // createPayment() throws on error — reaching here means success
-    const geniuspayReference = paymentResult.reference;
-    const checkoutUrl = paymentResult.checkout_url || paymentResult.payment_url || paymentResult.checkoutUrl;
+    // GeniusPay response: { success: true, data: { reference, checkout_url, ... } }
+    const paymentData = paymentResult.data || paymentResult;
+    const geniuspayReference = paymentData.reference;
+    const checkoutUrl = paymentData.checkout_url || paymentData.payment_url || paymentData.checkoutUrl;
 
     await prisma.payment.upsert({
       where: { quoteId },
@@ -56,16 +57,16 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
         amount,
         status: 'pending',
         isDeposit,
-        fees: paymentResult.fees || 0,
-        netAmount: paymentResult.net_amount || amount,
+        fees: paymentData.fees || 0,
+        netAmount: paymentData.net_amount || amount,
       },
       update: {
         geniuspayRef: geniuspayReference,
         amount,
         status: 'pending',
         isDeposit,
-        fees: paymentResult.fees || 0,
-        netAmount: paymentResult.net_amount || amount,
+        fees: paymentData.fees || 0,
+        netAmount: paymentData.net_amount || amount,
       },
     });
 

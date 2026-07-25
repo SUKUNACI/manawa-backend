@@ -157,6 +157,23 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
   }
 });
 
+// GET /api/payments/ping-geniuspay — test connectivité
+router.get('/ping-geniuspay', async (req, res) => {
+  const axios = require('axios');
+  try {
+    const r = await axios.get('https://geniuspay.ci/api/v1/merchant/account', {
+      timeout: 10000,
+      headers: {
+        'X-API-Key': process.env.GENIUSPAY_API_KEY,
+        'X-API-Secret': process.env.GENIUSPAY_API_SECRET,
+      },
+    });
+    res.json({ ok: true, status: r.status, data: r.data });
+  } catch (err) {
+    res.json({ ok: false, code: err.code, status: err.response?.status, data: err.response?.data, msg: err.message });
+  }
+});
+
 // GET /api/payments/success
 router.get('/success', (req, res) => {
   res.send(`

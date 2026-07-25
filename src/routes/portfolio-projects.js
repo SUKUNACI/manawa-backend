@@ -71,7 +71,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// GET /api/portfolio-projects/:id — détail avec tous les commentaires
+// GET /api/portfolio-projects/:id — détail avec tous les commentaires + réponses imbriquées
 router.get('/:id', async (req, res, next) => {
   try {
     const project = await prisma.portfolioProject.findUnique({
@@ -79,13 +79,26 @@ router.get('/:id', async (req, res, next) => {
       include: {
         professional: { include: { user: { select: { firstName: true, lastName: true, avatarUrl: true, email: true, city: true } } } },
         images: { orderBy: { sortOrder: 'asc' } },
-        comments: { orderBy: { createdAt: 'desc' }, include: { author: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+        comments: {
+          where: { parentId: null },
+          orderBy: { createdAt: 'asc' },
+          include: {
+            author: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+            replies: {
+              orderBy: { createdAt: 'asc' },
+              include: { author: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } } },
+            },
+          },
+        },
       },
     });
 
     if (!project) return res.status(404).json({ error: 'Réalisation non trouvée' });
 
-    const avgRating = project.comments.length > 0 ? (project.comments.reduce((sum, c) => sum + (c.rating || 0), 0) / project.comments.length) : 0;
+    const allComments = project.comments;
+    const avgRating = allComments.length > 0
+      ? (allComments.reduce((sum, c) => sum + (c.rating || 0), 0) / allComments.length)
+      : 0;
 
     res.json({ ...project, averageRating: Math.round(avgRating * 10) / 10 });
   } catch (err) {
@@ -185,15 +198,22 @@ router.post('/:id/like', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/portfolio-projects/:id/comments — ajouter un commentaire
+// POST /api/portfolio-projects/:id/comments — ajouter un commentaire ou une réponse
 router.post('/:id/comments', requireAuth, async (req, res, next) => {
   try {
-    const { content, rating } = req.body;
+    const { content, rating, parentId } = req.body;
     if (!content || content.trim().length === 0) return res.status(400).json({ error: 'Commentaire requis' });
     if (rating && (rating < 1 || rating > 5)) return res.status(400).json({ error: 'Note entre 1 et 5' });
 
     const project = await prisma.portfolioProject.findUnique({ where: { id: req.params.id } });
     if (!project) return res.status(404).json({ error: 'Réalisation non trouvée' });
+
+    if (parentId) {
+      const parent = await prisma.portfolioComment.findUnique({ where: { id: parentId } });
+      if (!parent || parent.portfolioProjectId !== req.params.id) {
+        return res.status(400).json({ error: 'Commentaire parent invalide' });
+      }
+    }
 
     const comment = await prisma.portfolioComment.create({
       data: {
@@ -201,8 +221,9 @@ router.post('/:id/comments', requireAuth, async (req, res, next) => {
         authorId: req.user.id,
         content,
         rating: rating ? parseInt(rating) : null,
+        parentId: parentId || null,
       },
-      include: { author: { select: { firstName: true, lastName: true, avatarUrl: true } } },
+      include: { author: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } } },
     });
 
     res.status(201).json(comment);

@@ -36,7 +36,11 @@ async function createPayment(payload) {
       },
       success_url: payload.successUrl,
       error_url: payload.errorUrl,
-      // Omit payment_method to show checkout page
+    }, {
+      headers: {
+        // Clé d'idempotence : même clé = même réponse GeniusPay, pas de double paiement
+        'X-Idempotency-Key': payload.idempotencyKey,
+      },
     });
 
     return response.data;

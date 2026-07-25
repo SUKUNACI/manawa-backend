@@ -65,6 +65,10 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
     const amount = Math.round(isDeposit ? quote.amount * 0.3 : quote.amount * 0.7);
     const description = `${isDeposit ? 'Acompte 30%' : 'Solde 70%'} - ${quote.project.title}`;
 
+    // Clé d'idempotence : réutiliser la clé existante sur retry, en générer une nouvelle sinon
+    // Garantit que GeniusPay retourne la même réponse si la requête est rejouée (réseau coupé, double-clic, etc.)
+    const idempotencyKey = existingPayment?.idempotencyKey || crypto.randomUUID();
+
     const paymentResult = await geniuspay.createPayment({
       amount,
       description,
@@ -75,6 +79,7 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
       projectId: quote.projectId,
       isDeposit,
       userId: req.user.id,
+      idempotencyKey,
       successUrl: `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/payments/success?quoteId=${quoteId}&isDeposit=${isDeposit}`,
       errorUrl: `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/payments/error?quoteId=${quoteId}`,
     });
@@ -86,11 +91,11 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
     if (existingPayment) {
       await prisma.payment.update({
         where: { id: existingPayment.id },
-        data: { geniuspayRef: geniuspayReference, status: 'pending', fees: paymentData.fees || 0, netAmount: paymentData.net_amount || amount },
+        data: { geniuspayRef: geniuspayReference, idempotencyKey, status: 'pending', fees: paymentData.fees || 0, netAmount: paymentData.net_amount || amount },
       });
     } else {
       await prisma.payment.create({
-        data: { quoteId, geniuspayRef: geniuspayReference, amount, status: 'pending', isDeposit, fees: paymentData.fees || 0, netAmount: paymentData.net_amount || amount },
+        data: { quoteId, geniuspayRef: geniuspayReference, idempotencyKey, amount, status: 'pending', isDeposit, fees: paymentData.fees || 0, netAmount: paymentData.net_amount || amount },
       });
     }
 

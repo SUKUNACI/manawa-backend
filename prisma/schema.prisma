@@ -272,6 +272,7 @@ model Payment {
   id              String   @id @default(uuid())
   quoteId         String
   geniuspayRef    String?
+  idempotencyKey  String?  @unique
   amount          Float
   status          String   // pending | succeeded | failed
   isDeposit       Boolean  @default(true)

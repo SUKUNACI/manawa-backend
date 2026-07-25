@@ -195,6 +195,75 @@ async function expirePendingPayments() {
 setInterval(expirePendingPayments, 60 * 60 * 1000);
 expirePendingPayments();
 
+// Réconciliation paiements pending < 1h avec GeniusPay (filet de sécurité)
+// Couvre les cas où : webhook manqué + client n'a pas retenté + paiement < 1h
+const geniuspay = require('./utils/geniuspay');
+
+async function reconcilePendingPayments() {
+  try {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    // Seulement les pending récents (< 1h) — les plus anciens sont gérés par expirePendingPayments
+    const pendingPayments = await prisma.payment.findMany({
+      where: {
+        status: 'pending',
+        geniuspayRef: { not: null },
+        createdAt: { gte: oneHourAgo },
+      },
+      select: { id: true, status: true, geniuspayRef: true, amount: true },
+    });
+
+    if (pendingPayments.length === 0) return;
+    console.log(`[CRON] Réconciliation : ${pendingPayments.length} paiement(s) pending à vérifier`);
+
+    let synced = 0;
+    let failed = 0;
+
+    for (const payment of pendingPayments) {
+      try {
+        const gpResponse = await geniuspay.getPayment(payment.geniuspayRef);
+        const gpData = gpResponse?.data || gpResponse;
+        const realStatus = gpData?.status;
+
+        if (realStatus === 'completed' || realStatus === 'success') {
+          const receivedAmount = gpData?.amount || gpData?.paid_amount;
+          if (receivedAmount !== undefined && Math.abs(receivedAmount - payment.amount) > 1) {
+            await prisma.payment.update({
+              where: { id: payment.id },
+              data: { status: 'failed', metadata: JSON.stringify({ reason: 'amount_mismatch', expected: payment.amount, received: receivedAmount }) },
+            });
+            await logPaymentStatus({ paymentId: payment.id, fromStatus: 'pending', toStatus: 'failed', reason: 'amount_mismatch', metadata: { expected: payment.amount, received: receivedAmount } });
+            failed++;
+          } else {
+            await prisma.payment.update({ where: { id: payment.id }, data: { status: 'succeeded', completedAt: new Date() } });
+            await logPaymentStatus({ paymentId: payment.id, fromStatus: 'pending', toStatus: 'succeeded', reason: 'reconciliation' });
+            synced++;
+          }
+        } else if (realStatus === 'failed' || realStatus === 'cancelled' || realStatus === 'expired') {
+          await prisma.payment.update({ where: { id: payment.id }, data: { status: 'failed' } });
+          await logPaymentStatus({ paymentId: payment.id, fromStatus: 'pending', toStatus: 'failed', reason: 'reconciliation', metadata: { geniuspayStatus: realStatus } });
+          failed++;
+        }
+        // Si GeniusPay retourne encore 'pending' → on ne touche rien, on re-vérifie au prochain cron
+      } catch (err) {
+        // GeniusPay injoignable pour ce paiement — on ignore, on réessaiera au prochain tour
+        console.warn(`[CRON] Réconciliation — impossible de vérifier ${payment.geniuspayRef}: ${err.message}`);
+      }
+    }
+
+    if (synced > 0 || failed > 0) {
+      console.log(`[CRON] Réconciliation terminée — ${synced} confirmé(s), ${failed} échoué(s)`);
+    }
+  } catch (err) {
+    console.error('[CRON] Erreur réconciliation paiements:', err.message);
+  }
+}
+
+// Décalage de 30min par rapport aux autres crons pour éviter les pics simultanés
+setTimeout(() => {
+  reconcilePendingPayments();
+  setInterval(reconcilePendingPayments, 60 * 60 * 1000);
+}, 30 * 60 * 1000);
+
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`Serveur MANAWA démarré sur le port ${PORT}`);

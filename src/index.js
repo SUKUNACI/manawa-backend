@@ -166,17 +166,27 @@ setInterval(expireQuotes, 60 * 60 * 1000);
 expireQuotes();
 
 // Expiration automatique des paiements pending depuis plus de 1h
+const { logPaymentStatus } = require('./utils/paymentAudit');
+
 async function expirePendingPayments() {
   try {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const { count } = await prisma.payment.updateMany({
-      where: {
-        status: 'pending',
-        createdAt: { lt: oneHourAgo },
-      },
+    const expiredPayments = await prisma.payment.findMany({
+      where: { status: 'pending', createdAt: { lt: oneHourAgo } },
+      select: { id: true, status: true },
+    });
+    if (expiredPayments.length === 0) return;
+
+    await prisma.payment.updateMany({
+      where: { id: { in: expiredPayments.map(p => p.id) } },
       data: { status: 'failed' },
     });
-    if (count > 0) console.log(`[CRON] ${count} paiement(s) pending expiré(s)`);
+
+    for (const p of expiredPayments) {
+      await logPaymentStatus({ paymentId: p.id, fromStatus: 'pending', toStatus: 'failed', reason: 'cron_expiry' });
+    }
+
+    console.log(`[CRON] ${expiredPayments.length} paiement(s) pending expiré(s)`);
   } catch (err) {
     console.error('[CRON] Erreur expiration paiements:', err.message);
   }

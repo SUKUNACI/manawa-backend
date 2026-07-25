@@ -138,11 +138,21 @@ router.get('/:id', requireAuth, async (req, res, next) => {
             const gpResponse = await geniuspay.getPayment(payment.geniuspayRef);
             const gpData = gpResponse?.data || gpResponse;
             if (gpData?.status === 'completed' || gpData?.status === 'success') {
-              await prisma.payment.update({
-                where: { id: payment.id },
-                data: { status: 'succeeded', completedAt: new Date() },
-              });
-              payment.status = 'succeeded';
+              const receivedAmount = gpData?.amount || gpData?.paid_amount;
+              if (receivedAmount !== undefined && Math.abs(receivedAmount - payment.amount) > 1) {
+                console.error(`[Payment] MONTANT INCORRECT — id: ${payment.id}, attendu: ${payment.amount}, reçu: ${receivedAmount}`);
+                await prisma.payment.update({
+                  where: { id: payment.id },
+                  data: { status: 'failed', metadata: JSON.stringify({ reason: 'amount_mismatch', expected: payment.amount, received: receivedAmount }) },
+                });
+                payment.status = 'failed';
+              } else {
+                await prisma.payment.update({
+                  where: { id: payment.id },
+                  data: { status: 'succeeded', completedAt: new Date() },
+                });
+                payment.status = 'succeeded';
+              }
             }
           } catch {}
         }

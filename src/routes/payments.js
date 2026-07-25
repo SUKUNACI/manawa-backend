@@ -6,6 +6,27 @@ const geniuspay = require('../utils/geniuspay');
 
 const router = express.Router();
 
+// Vérifie le montant reçu vs attendu (±1 FCFA pour les arrondis)
+// Retourne true si le montant est valide, false sinon
+async function verifyAndUpdatePayment(payment, gpData) {
+  const receivedAmount = gpData?.amount || gpData?.paid_amount;
+  if (receivedAmount !== undefined && Math.abs(receivedAmount - payment.amount) > 1) {
+    console.error(
+      `[Payment] MONTANT INCORRECT — id: ${payment.id}, attendu: ${payment.amount}, reçu: ${receivedAmount}`
+    );
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: 'failed', metadata: JSON.stringify({ reason: 'amount_mismatch', expected: payment.amount, received: receivedAmount }) },
+    });
+    return false;
+  }
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: { status: 'succeeded', completedAt: new Date() },
+  });
+  return true;
+}
+
 // POST /api/payments/create-checkout
 router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, res, next) => {
   try {
@@ -36,14 +57,12 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
       // Si pending, re-vérifier chez GeniusPay (webhook peut avoir manqué)
       if (existingPayment.status === 'pending' && existingPayment.geniuspayRef) {
         try {
-          const gpData = await geniuspay.getPayment(existingPayment.geniuspayRef);
-          const realStatus = gpData?.data?.status || gpData?.status;
+          const gpResponse = await geniuspay.getPayment(existingPayment.geniuspayRef);
+          const gpData = gpResponse?.data || gpResponse;
+          const realStatus = gpData?.status;
           if (realStatus === 'completed' || realStatus === 'success') {
-            await prisma.payment.update({
-              where: { id: existingPayment.id },
-              data: { status: 'succeeded', completedAt: new Date() },
-            });
-            existingPayment.status = 'succeeded';
+            const valid = await verifyAndUpdatePayment(existingPayment, gpData);
+            if (valid) existingPayment.status = 'succeeded';
           }
         } catch {}
       }
@@ -140,15 +159,26 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
     // Traiter différents événements de paiement
     if (event === 'payment.success' && data.status === 'completed') {
       const reference = data.reference;
-      const metadata = data.metadata || {};
 
-      // Mettre à jour le paiement en base de données
       const payment = await prisma.payment.findUnique({
         where: { geniuspayRef: reference },
         include: { quote: { include: { project: true } } },
       });
 
       if (payment) {
+        // Vérification du montant : le montant reçu doit correspondre au montant attendu (±1 FCFA)
+        const receivedAmount = data.amount || data.paid_amount;
+        if (receivedAmount !== undefined && Math.abs(receivedAmount - payment.amount) > 1) {
+          console.error(
+            `[Payment] MONTANT INCORRECT — ref: ${reference}, attendu: ${payment.amount}, reçu: ${receivedAmount}. Paiement rejeté.`
+          );
+          await prisma.payment.update({
+            where: { id: payment.id },
+            data: { status: 'failed', metadata: JSON.stringify({ reason: 'amount_mismatch', expected: payment.amount, received: receivedAmount }) },
+          });
+          return res.status(400).json({ error: 'Amount mismatch' });
+        }
+
         await prisma.payment.update({
           where: { id: payment.id },
           data: {
@@ -160,7 +190,7 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
           },
         });
 
-        // Si c'est le dernier paiement (solde), marquer le devis comme complété
+        // Si c'est le solde, marquer le devis comme complété
         if (!payment.isDeposit) {
           await prisma.quote.update({
             where: { id: payment.quoteId },
@@ -304,11 +334,8 @@ router.get('/status/:quoteId', requireAuth, async (req, res, next) => {
           const gpResponse = await geniuspay.getPayment(payment.geniuspayRef);
           const gpData = gpResponse?.data || gpResponse;
           if (gpData?.status === 'completed' || gpData?.status === 'success') {
-            await prisma.payment.update({
-              where: { id: payment.id },
-              data: { status: 'succeeded', completedAt: new Date() },
-            });
-            payment.status = 'succeeded';
+            const valid = await verifyAndUpdatePayment(payment, gpData);
+            if (valid) payment.status = 'succeeded';
           }
         } catch {}
       }

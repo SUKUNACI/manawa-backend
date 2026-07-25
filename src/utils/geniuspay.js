@@ -8,6 +8,7 @@ const WEBHOOK_SECRET = process.env.GENIUSPAY_WEBHOOK_SECRET;
 
 const client = axios.create({
   baseURL: GENIUSPAY_BASE_URL,
+  timeout: 15000,
   headers: {
     'X-API-Key': API_KEY,
     'X-API-Secret': API_SECRET,
@@ -40,7 +41,9 @@ async function createPayment(payload) {
 
     return response.data;
   } catch (err) {
-    console.error('GeniusPay createPayment error:', err.response?.data || err.message);
+    const status = err.response?.status;
+    const data = err.response?.data;
+    console.error('[GeniusPay] createPayment error — status:', status, 'code:', err.code, 'data:', JSON.stringify(data), 'msg:', err.message);
     throw err;
   }
 }

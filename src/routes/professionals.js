@@ -4,7 +4,7 @@ const upload = require('../config/upload');
 const { uploadBuffer } = require('../config/cloudinary');
 const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const { computeTrustScore, getTrustScoreBreakdown } = require('../utils/trustScore');
-const { isPremiumActive, isOnTrial, PREMIUM_PRICE_FCFA } = require('./subscriptions');
+const { isPremiumActive, isOnTrial, getActiveTier, getTierConfig, PREMIUM_PRICE_FCFA } = require('./subscriptions');
 
 const router = express.Router();
 
@@ -67,11 +67,13 @@ router.get('/', optionalAuth, async (req, res, next) => {
     const qAccMap = Object.fromEntries(quoteAcceptedCounts.map(q => [q.professionalId, q._count]));
     const badRevMap = Object.fromEntries(badReviewCounts.map(q => [q.professionalId, q._count]));
 
+    const TIER_PRIORITY = { ELITE: 3, PRO: 2, ESSENTIEL: 1, GRATUIT: 0 };
     const withScores = result.map((p) => {
       const extras = { quoteSentCount: qSentMap[p.id] || 0, quoteAcceptedCount: qAccMap[p.id] || 0, badReviewCount: badRevMap[p.id] || 0 };
-      return { ...p, trustScore: computeTrustScore(p, extras), isPremium: isPremiumActive(p.subscription, p), isOnTrial: isOnTrial(p), subscription: undefined };
+      const activeTier = getActiveTier(p.subscription, p);
+      return { ...p, trustScore: computeTrustScore(p, extras), isPremium: activeTier !== 'GRATUIT', tier: activeTier, isOnTrial: isOnTrial(p), subscription: undefined };
     });
-    withScores.sort((a, b) => (b.isPremium - a.isPremium) || (b.averageRating - a.averageRating));
+    withScores.sort((a, b) => (TIER_PRIORITY[b.tier] - TIER_PRIORITY[a.tier]) || (b.averageRating - a.averageRating));
 
     res.json(withScores);
   } catch (err) {
@@ -142,26 +144,27 @@ router.patch('/me', requireAuth, requireRole('PROFESSIONAL'), async (req, res, n
     const { trade, trades, companyName, siret, description, yearsExperience, hourlyRate, interventionRadiusKm, qualibatNumber } = req.body;
 
     const current = await prisma.professional.findUnique({ where: { userId: req.user.id }, include: { subscription: true } });
-    const premium = isPremiumActive(current.subscription, current);
+    const tier = getActiveTier(current.subscription, current);
+    const tierCfg = getTierConfig(tier);
 
     const data = { trade, companyName, siret, description, hourlyRate, interventionRadiusKm, qualibatNumber };
 
     if (Array.isArray(trades)) {
-      const maxTrades = premium ? 6 : 3;
+      const maxTrades = tierCfg.maxTrades;
       if (trades.length > maxTrades) {
-        return res.status(400).json({ error: `Vous pouvez choisir jusqu'à ${maxTrades} métiers${premium ? '' : ' (passez Premium pour aller jusqu\'à 6)'}.` });
+        return res.status(400).json({ error: `Votre abonnement ${tierCfg.label} vous permet jusqu'à ${maxTrades} métier(s). Passez à Pro ou Élite pour en ajouter jusqu'à 6.` });
       }
       data.trades = trades;
       data.trade = trades[0] || current.trade;
     }
 
     if (yearsExperience !== undefined && yearsExperience !== current.yearsExperience) {
-      const cooldownDays = premium ? 90 : 365;
+      const cooldownDays = tier !== 'GRATUIT' ? 90 : 365;
       if (current.lastExperienceUpdate) {
         const daysSinceUpdate = (Date.now() - new Date(current.lastExperienceUpdate).getTime()) / (1000 * 60 * 60 * 24);
         if (daysSinceUpdate < cooldownDays) {
           const daysLeft = Math.ceil(cooldownDays - daysSinceUpdate);
-          return res.status(400).json({ error: `Vous pourrez modifier vos années d'expérience dans ${daysLeft} jour(s).${premium ? '' : ' (Premium : tous les 3 mois au lieu d\'1 fois par an)'}` });
+          return res.status(400).json({ error: `Vous pourrez modifier vos années d'expérience dans ${daysLeft} jour(s).${tier === 'GRATUIT' ? ' (Abonnement payant : tous les 3 mois au lieu d\'1 fois par an)' : ''}` });
         }
       }
       data.yearsExperience = yearsExperience;
@@ -181,9 +184,7 @@ router.post('/me/portfolio', requireAuth, requireRole('PROFESSIONAL'), upload.si
     if (!req.file) return res.status(400).json({ error: 'Photo requise' });
     const pro = await prisma.professional.findUnique({ where: { userId: req.user.id }, include: { portfolio: true, subscription: true } });
 
-    if (!isPremiumActive(pro.subscription, pro) && pro.portfolio.length >= 6) {
-      return res.status(403).json({ error: 'Limite de 6 photos atteinte pour les comptes gratuits. Passez Premium pour un portfolio illimité.' });
-    }
+
 
     const imageUrl = await uploadBuffer(req.file.buffer, 'manawa/portfolio');
     const item = await prisma.portfolioItem.create({
@@ -284,9 +285,11 @@ router.get('/me/views', requireAuth, requireRole('PROFESSIONAL'), async (req, re
       }
     }
 
-    const response = { totalViews: views.length, views: Array.from(byViewer.values()), isPremium: isPremiumActive(pro.subscription, pro) };
+    const viewTier = getActiveTier(pro.subscription, pro);
+    const tierHasStats = getTierConfig(viewTier).hasStats;
+    const response = { totalViews: views.length, views: Array.from(byViewer.values()), isPremium: viewTier !== 'GRATUIT', canSeeVisitors: getTierConfig(viewTier).canSeeVisitors };
 
-    if (response.isPremium) {
+    if (tierHasStats) {
       const weeks = {};
       for (const v of views) {
         const weekStart = new Date(v.createdAt);
@@ -525,7 +528,8 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
       }
     }
 
-    res.json({ ...pro, portfolio, isFollowing, followerCount: pro.followers.length, followers: undefined, trustScore: computeTrustScore(pro, extras), trustScoreBreakdown: getTrustScoreBreakdown(pro, extras), isPremium: isPremiumActive(pro.subscription, pro), isOnTrial: isOnTrial(pro), trialEndsAt: pro.trialEndsAt, subscription: undefined });
+    const activeTier = getActiveTier(pro.subscription, pro);
+    res.json({ ...pro, portfolio, isFollowing, followerCount: pro.followers.length, followers: undefined, trustScore: computeTrustScore(pro, extras), trustScoreBreakdown: getTrustScoreBreakdown(pro, extras), isPremium: activeTier !== 'GRATUIT', tier: activeTier, isOnTrial: isOnTrial(pro), trialEndsAt: pro.trialEndsAt, subscription: undefined });
   } catch (err) {
     next(err);
   }

@@ -157,18 +157,32 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
   }
 });
 
-// GET /api/payments/ping-geniuspay — test connectivité
+// GET /api/payments/ping-geniuspay — test connectivité + création paiement test
 router.get('/ping-geniuspay', async (req, res) => {
   const axios = require('axios');
   try {
+    // Test 1 : account
     const r = await axios.get('https://geniuspay.ci/api/v1/merchant/account', {
       timeout: 10000,
-      headers: {
-        'X-API-Key': process.env.GENIUSPAY_API_KEY,
-        'X-API-Secret': process.env.GENIUSPAY_API_SECRET,
-      },
+      headers: { 'X-API-Key': process.env.GENIUSPAY_API_KEY, 'X-API-Secret': process.env.GENIUSPAY_API_SECRET },
     });
-    res.json({ ok: true, status: r.status, data: r.data });
+    // Test 2 : créer un vrai paiement test
+    let paymentTest = null;
+    try {
+      const p = await axios.post('https://geniuspay.ci/api/v1/merchant/payments', {
+        amount: 1000, currency: 'XOF', description: 'Test paiement',
+        customer: { name: 'Test User', email: 'test@test.com', phone: '0700000000' },
+        success_url: 'https://example.com/success',
+        error_url: 'https://example.com/error',
+      }, {
+        timeout: 10000,
+        headers: { 'X-API-Key': process.env.GENIUSPAY_API_KEY, 'X-API-Secret': process.env.GENIUSPAY_API_SECRET, 'Content-Type': 'application/json' },
+      });
+      paymentTest = { ok: true, status: p.status, data: p.data };
+    } catch (pe) {
+      paymentTest = { ok: false, code: pe.code, status: pe.response?.status, data: pe.response?.data, msg: pe.message };
+    }
+    res.json({ account: { ok: true, status: r.status, data: r.data }, payment: paymentTest });
   } catch (err) {
     res.json({ ok: false, code: err.code, status: err.response?.status, data: err.response?.data, msg: err.message });
   }

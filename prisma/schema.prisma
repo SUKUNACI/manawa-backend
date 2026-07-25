@@ -233,7 +233,7 @@ model Quote {
   parentQuoteId  String?
   validityDays   Int          @default(15)
   version        Int          @default(1)
-  payment        Payment?
+  payments       Payment[]
   parentQuote    Quote?       @relation("QuoteRevisions", fields: [parentQuoteId], references: [id])
   revisions      Quote[]      @relation("QuoteRevisions")
   professional   Professional @relation(fields: [professionalId], references: [id])
@@ -270,19 +270,21 @@ model Subscription {
 
 model Payment {
   id              String   @id @default(uuid())
-  quoteId         String   @unique
-  geniuspayRef    String?  // Référence GeniusPay (ex: MTX-XXXXXXXX)
+  quoteId         String
+  geniuspayRef    String?
   amount          Float
   status          String   // pending | succeeded | failed
   isDeposit       Boolean  @default(true)
-  fees            Float    @default(0) // Frais GeniusPay
-  netAmount       Float?   // Montant net (amount - fees)
-  paymentMethod   String?  // wave, orange_money, mtn_money, card, etc.
-  metadata        String?  // JSON stringifié pour métadonnées additionnelles
+  fees            Float    @default(0)
+  netAmount       Float?
+  paymentMethod   String?
+  metadata        String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  completedAt     DateTime? // Date de confirmation du paiement
+  completedAt     DateTime?
   quote           Quote    @relation(fields: [quoteId], references: [id])
+
+  @@unique([quoteId, isDeposit])
 }
 
 model Message {

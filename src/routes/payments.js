@@ -24,14 +24,29 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
       return res.status(400).json({ error: 'Ce devis doit être accepté avant paiement' });
     }
 
-    // Vérifier si un paiement succeeded existe déjà pour ce devis/type
+    // Vérifier si un paiement existe déjà pour ce devis
     const existingPayment = await prisma.payment.findUnique({ where: { quoteId } });
     if (existingPayment) {
-      if (existingPayment.status === 'succeeded') {
+      // Si pending, vérifier le statut réel chez GeniusPay (le webhook a peut-être manqué)
+      if (existingPayment.status === 'pending' && existingPayment.geniuspayRef) {
+        try {
+          const gpData = await geniuspay.getPayment(existingPayment.geniuspayRef);
+          const realStatus = gpData?.data?.status || gpData?.status;
+          if (realStatus === 'completed' || realStatus === 'success') {
+            await prisma.payment.update({
+              where: { id: existingPayment.id },
+              data: { status: 'succeeded', completedAt: new Date() },
+            });
+            existingPayment.status = 'succeeded';
+          }
+        } catch {}
+      }
+
+      if (existingPayment.status === 'succeeded' && existingPayment.isDeposit === isDeposit) {
         return res.status(400).json({ error: 'Ce paiement a déjà été effectué avec succès.' });
       }
-      if (existingPayment.status === 'pending' && existingPayment.isDeposit === isDeposit) {
-        return res.status(400).json({ error: 'Un paiement est déjà en cours pour ce devis. Vérifiez votre application de paiement.' });
+      if (existingPayment.status === 'succeeded' && isDeposit === false && existingPayment.isDeposit === false) {
+        return res.status(400).json({ error: 'Le solde a déjà été payé.' });
       }
     }
     if (quote.project.clientId !== req.user.id) {
@@ -281,16 +296,18 @@ router.get('/status/:quoteId', requireAuth, async (req, res, next) => {
     // Récupérer les détails actualisés depuis GeniusPay si nécessaire
     if (payment.status === 'pending' && payment.geniuspayRef) {
       try {
-        const geniuspayData = await geniuspay.getPayment(payment.geniuspayRef);
-        if (geniuspayData.status === 'completed') {
+        const gpResponse = await geniuspay.getPayment(payment.geniuspayRef);
+        const gpData = gpResponse?.data || gpResponse;
+        const realStatus = gpData?.status;
+        if (realStatus === 'completed' || realStatus === 'success') {
           await prisma.payment.update({
             where: { id: payment.id },
             data: {
               status: 'succeeded',
               completedAt: new Date(),
-              fees: geniuspayData.fees,
-              netAmount: geniuspayData.net_amount,
-              paymentMethod: geniuspayData.payment_method,
+              fees: gpData.fees || payment.fees,
+              netAmount: gpData.net_amount || payment.netAmount,
+              paymentMethod: gpData.payment_method || payment.paymentMethod,
             },
           });
           payment.status = 'succeeded';

@@ -3,6 +3,7 @@ const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { sendPushNotification } = require('../config/pushNotifications');
 const generateQuotePdf = require('../utils/generateQuotePdf');
+const { getActiveTier, getTierConfig } = require('./subscriptions');
 
 const router = express.Router();
 
@@ -25,10 +26,29 @@ router.post('/', requireAuth, requireRole('PROFESSIONAL'), async (req, res, next
       return res.status(400).json({ error: 'Au moins une ligne est requise pour un devis détaillé' });
     }
 
-    const pro = await prisma.professional.findUnique({ where: { userId: req.user.id } });
+    const pro = await prisma.professional.findUnique({ where: { userId: req.user.id }, include: { subscription: true } });
 
     if (!pro.verifiedByAdmin) {
       return res.status(403).json({ error: "Votre identité doit être vérifiée avant de pouvoir envoyer un devis. Rendez-vous dans Compte → Vérification d'identité." });
+    }
+
+    const quoteTier = getActiveTier(pro.subscription, pro);
+    const quoteTierCfg = getTierConfig(quoteTier);
+    if (quoteTierCfg.maxQuotesPerMonth !== null) {
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      const quotesThisMonth = await prisma.quote.count({
+        where: { professionalId: pro.id, createdAt: { gte: startOfMonth } },
+      });
+      if (quotesThisMonth >= quoteTierCfg.maxQuotesPerMonth) {
+        return res.status(403).json({
+          error: `Limite de ${quoteTierCfg.maxQuotesPerMonth} devis/mois atteinte pour l'abonnement ${quoteTierCfg.label}. Passez à Pro ou Élite pour des devis illimités.`,
+          limitReached: true,
+          maxQuotesPerMonth: quoteTierCfg.maxQuotesPerMonth,
+          tier: quoteTier,
+        });
+      }
     }
 
     const existingPending = await prisma.quote.findFirst({

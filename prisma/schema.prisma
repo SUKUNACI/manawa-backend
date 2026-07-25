@@ -242,6 +242,7 @@ model Subscription {
   id             String       @id @default(uuid())
   professionalId String       @unique
   status         String       @default("INACTIVE")
+  tier           String       @default("ESSENTIEL")
   transactionId  String?
   startedAt      DateTime?
   expiresAt      DateTime?

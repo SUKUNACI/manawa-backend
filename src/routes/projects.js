@@ -1,7 +1,7 @@
 const express = require('express');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { isPremiumActive } = require('./subscriptions');
+const { getActiveTier, getTierConfig } = require('./subscriptions');
 const { sendPushNotification } = require('../config/pushNotifications');
 const upload = require('../config/upload');
 const { uploadBuffer } = require('../config/cloudinary');
@@ -53,11 +53,12 @@ router.get('/', requireAuth, async (req, res, next) => {
       status: status || 'OPEN',
     };
 
-    // Les comptes gratuits ne voient les projets qu'après 1h
     if (req.user.role === 'PROFESSIONAL') {
       const pro = await prisma.professional.findUnique({ where: { userId: req.user.id }, include: { subscription: true } });
-      if (!isPremiumActive(pro?.subscription)) {
-        where.createdAt = { lte: new Date(Date.now() - 60 * 60 * 1000) };
+      const projectsTier = getActiveTier(pro?.subscription, pro);
+      const delayMs = getTierConfig(projectsTier).projectsDelayMs;
+      if (delayMs > 0) {
+        where.createdAt = { lte: new Date(Date.now() - delayMs) };
       }
     }
 

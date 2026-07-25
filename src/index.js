@@ -162,8 +162,28 @@ async function expireQuotes() {
   }
 }
 
-setInterval(expireQuotes, 60 * 60 * 1000); // toutes les heures
-expireQuotes(); // exécuter au démarrage
+setInterval(expireQuotes, 60 * 60 * 1000);
+expireQuotes();
+
+// Expiration automatique des paiements pending depuis plus de 1h
+async function expirePendingPayments() {
+  try {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const { count } = await prisma.payment.updateMany({
+      where: {
+        status: 'pending',
+        createdAt: { lt: oneHourAgo },
+      },
+      data: { status: 'failed' },
+    });
+    if (count > 0) console.log(`[CRON] ${count} paiement(s) pending expiré(s)`);
+  } catch (err) {
+    console.error('[CRON] Erreur expiration paiements:', err.message);
+  }
+}
+
+setInterval(expirePendingPayments, 60 * 60 * 1000);
+expirePendingPayments();
 
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {

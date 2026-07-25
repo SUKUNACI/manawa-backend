@@ -64,13 +64,30 @@ router.get('/', requireAuth, async (req, res, next) => {
 
     const projects = await prisma.project.findMany({
       where,
-      include: { photos: true, client: { select: { firstName: true, lastName: true, city: true } } },
+      include: {
+        photos: true,
+        client: { select: { firstName: true, lastName: true, city: true } },
+        _count: { select: { quotes: true } },
+      },
       orderBy: { createdAt: 'desc' },
       take: limit,
       skip: (page - 1) * limit,
     });
 
-    res.json(projects);
+    // Marquer les projets où le pro a déjà soumis un devis
+    let alreadyQuotedIds = new Set();
+    if (req.user.role === 'PROFESSIONAL') {
+      const pro = await prisma.professional.findUnique({ where: { userId: req.user.id } });
+      if (pro) {
+        const existing = await prisma.quote.findMany({
+          where: { professionalId: pro.id, projectId: { in: projects.map(p => p.id) } },
+          select: { projectId: true },
+        });
+        alreadyQuotedIds = new Set(existing.map(q => q.projectId));
+      }
+    }
+
+    res.json(projects.map(p => ({ ...p, quoteCount: p._count.quotes, _count: undefined, alreadyQuoted: alreadyQuotedIds.has(p.id) })));
   } catch (err) {
     next(err);
   }

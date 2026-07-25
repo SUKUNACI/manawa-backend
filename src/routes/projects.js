@@ -3,6 +3,7 @@ const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { getActiveTier, getTierConfig } = require('./subscriptions');
 const { sendPushNotification } = require('../config/pushNotifications');
+const geniuspay = require('../utils/geniuspay');
 const upload = require('../config/upload');
 const { uploadBuffer } = require('../config/cloudinary');
 
@@ -120,7 +121,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
           include: {
             professional: { include: { user: true } },
             items: { orderBy: { sortOrder: 'asc' } },
-            payments: { select: { status: true, isDeposit: true } },
+            payments: { select: { id: true, status: true, isDeposit: true, geniuspayRef: true } },
           },
           orderBy: { version: 'desc' },
         },
@@ -128,6 +129,26 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       },
     });
     if (!project) return res.status(404).json({ error: 'Projet introuvable' });
+
+    // Re-vérifier les paiements pending chez GeniusPay (webhook peut avoir manqué)
+    for (const quote of project.quotes) {
+      for (const payment of quote.payments) {
+        if (payment.status === 'pending' && payment.geniuspayRef) {
+          try {
+            const gpResponse = await geniuspay.getPayment(payment.geniuspayRef);
+            const gpData = gpResponse?.data || gpResponse;
+            if (gpData?.status === 'completed' || gpData?.status === 'success') {
+              await prisma.payment.update({
+                where: { id: payment.id },
+                data: { status: 'succeeded', completedAt: new Date() },
+              });
+              payment.status = 'succeeded';
+            }
+          } catch {}
+        }
+      }
+    }
+
     res.json({ ...project, alreadyReviewed: !!project.review });
   } catch (err) {
     next(err);

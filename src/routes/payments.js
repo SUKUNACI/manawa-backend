@@ -40,8 +40,8 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
       projectId: quote.projectId,
       isDeposit,
       userId: req.user.id,
-      successUrl: `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/payments/success`,
-      errorUrl: `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/payments/error`,
+      successUrl: `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/payments/success?quoteId=${quoteId}`,
+      errorUrl: `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/payments/error?quoteId=${quoteId}`,
     });
 
     // GeniusPay response: { success: true, data: { reference, checkout_url, ... } }
@@ -189,29 +189,66 @@ router.get('/ping-geniuspay', async (req, res) => {
   }
 });
 
-// GET /api/payments/success
+// GET /api/payments/success — redirige vers l'app via deep link
 router.get('/success', (req, res) => {
+  const { quoteId } = req.query;
+  const deepLink = `manawa://payment/success?quoteId=${quoteId || ''}`;
   res.send(`
     <html>
-      <head><title>Paiement réussi</title></head>
-      <body style="font-family:sans-serif;text-align:center;padding-top:80px;">
-        <h2>✓ Paiement réussi</h2>
-        <p>Votre paiement a été traité avec succès.</p>
-        <p style="color:#666;margin-top:20px;">Vous pouvez retourner sur l'application MANAWA.</p>
+      <head>
+        <title>Paiement réussi</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: -apple-system, sans-serif; text-align: center; padding: 60px 24px; background: #0A0D14; color: #fff; }
+          .icon { font-size: 64px; margin-bottom: 16px; }
+          h2 { color: #22C55E; font-size: 24px; margin-bottom: 8px; }
+          p { color: #9CA3AF; font-size: 15px; line-height: 1.5; }
+          .btn { display: inline-block; margin-top: 32px; background: #F4720B; color: #fff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-size: 16px; font-weight: 600; }
+        </style>
+        <script>
+          window.onload = function() {
+            window.location.href = '${deepLink}';
+            setTimeout(function() {}, 3000);
+          };
+        </script>
+      </head>
+      <body>
+        <div class="icon">✅</div>
+        <h2>Paiement réussi !</h2>
+        <p>Votre paiement a été traité avec succès.<br>Retour automatique sur MANAWA...</p>
+        <a class="btn" href="${deepLink}">Retourner sur MANAWA</a>
       </body>
     </html>
   `);
 });
 
-// GET /api/payments/error
+// GET /api/payments/error — redirige vers l'app via deep link
 router.get('/error', (req, res) => {
+  const { quoteId } = req.query;
+  const deepLink = `manawa://payment/error?quoteId=${quoteId || ''}`;
   res.send(`
     <html>
-      <head><title>Erreur de paiement</title></head>
-      <body style="font-family:sans-serif;text-align:center;padding-top:80px;">
-        <h2>✗ Paiement échoué</h2>
-        <p>Une erreur s'est produite lors du traitement de votre paiement.</p>
-        <p style="color:#666;margin-top:20px;">Veuillez réessayer ou contacter le support.</p>
+      <head>
+        <title>Paiement échoué</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: -apple-system, sans-serif; text-align: center; padding: 60px 24px; background: #0A0D14; color: #fff; }
+          .icon { font-size: 64px; margin-bottom: 16px; }
+          h2 { color: #EF4444; font-size: 24px; margin-bottom: 8px; }
+          p { color: #9CA3AF; font-size: 15px; line-height: 1.5; }
+          .btn { display: inline-block; margin-top: 32px; background: #F4720B; color: #fff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-size: 16px; font-weight: 600; }
+        </style>
+        <script>
+          window.onload = function() {
+            window.location.href = '${deepLink}';
+          };
+        </script>
+      </head>
+      <body>
+        <div class="icon">❌</div>
+        <h2>Paiement échoué</h2>
+        <p>Une erreur s'est produite lors du paiement.<br>Retour automatique sur MANAWA...</p>
+        <a class="btn" href="${deepLink}">Retourner sur MANAWA</a>
       </body>
     </html>
   `);

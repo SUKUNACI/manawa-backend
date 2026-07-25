@@ -120,7 +120,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
           include: {
             professional: { include: { user: true } },
             items: { orderBy: { sortOrder: 'asc' } },
-            payment: { select: { status: true, isDeposit: true } },
+            payments: { select: { status: true, isDeposit: true } },
           },
           orderBy: { version: 'desc' },
         },

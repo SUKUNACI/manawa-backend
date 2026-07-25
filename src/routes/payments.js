@@ -1,10 +1,22 @@
 const express = require('express');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const geniuspay = require('../utils/geniuspay');
 
 const router = express.Router();
+
+// 5 tentatives de paiement max par utilisateur par heure
+const paymentRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Trop de tentatives de paiement. Réessayez dans une heure.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false,
+});
 
 // Vérifie le montant reçu vs attendu (±1 FCFA pour les arrondis)
 // Retourne true si le montant est valide, false sinon
@@ -28,7 +40,7 @@ async function verifyAndUpdatePayment(payment, gpData) {
 }
 
 // POST /api/payments/create-checkout
-router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, res, next) => {
+router.post('/create-checkout', requireAuth, requireRole('CLIENT'), paymentRateLimit, async (req, res, next) => {
   try {
     const { quoteId, isDeposit } = req.body;
     console.log('[Payment] create-checkout called, quoteId:', quoteId, 'isDeposit:', isDeposit);

@@ -10,6 +10,7 @@ const router = express.Router();
 router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, res, next) => {
   try {
     const { quoteId, isDeposit } = req.body;
+    console.log('[Payment] create-checkout called, quoteId:', quoteId, 'isDeposit:', isDeposit);
 
     if (!quoteId) return res.status(400).json({ error: 'quoteId est requis' });
 
@@ -17,7 +18,9 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), async (req, 
       where: { id: quoteId },
       include: { project: true, professional: true },
     });
+    console.log('[Payment] quote found:', quote?.id, 'status:', quote?.status);
     if (!quote || quote.status !== 'ACCEPTED') {
+      console.log('[Payment] quote not accepted, status:', quote?.status);
       return res.status(400).json({ error: 'Ce devis doit être accepté avant paiement' });
     }
     if (quote.project.clientId !== req.user.id) {

@@ -31,6 +31,7 @@ const notificationRoutes = require('./routes/notifications');
 const supportRoutes = require('./routes/support');
 const portfolioProjectsRoutes = require('./routes/portfolio-projects');
 const reportsRoutes = require('./routes/reports');
+const disputeRoutes = require('./routes/disputes');
 
 // Firebase initialization
 const { initializeFirebase, getMessaging } = require('./config/firebase-admin');
@@ -96,6 +97,7 @@ app.use('/api/support', supportRoutes);
 app.use('/api/portfolio-projects', portfolioProjectsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/disputes', disputeRoutes);
 
 // Panel d'administration (interface web)
 app.use('/admin', express.static(require('path').join(__dirname, '../admin-panel')));

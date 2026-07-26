@@ -2962,6 +2962,150 @@ router.patch('/reviews/:id/flag', async (req, res, next) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// GESTION DES DEVIS
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/admin/quotes/stats
+router.get('/quotes/stats', async (req, res, next) => {
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      total, pending, accepted, refused, expired, revised,
+      last30d, totalAmount, acceptedAmount, byMode,
+    ] = await Promise.all([
+      prisma.quote.count(),
+      prisma.quote.count({ where: { status: 'PENDING' } }),
+      prisma.quote.count({ where: { status: 'ACCEPTED' } }),
+      prisma.quote.count({ where: { status: 'REFUSED' } }),
+      prisma.quote.count({ where: { status: 'EXPIRED' } }),
+      prisma.quote.count({ where: { status: 'REVISED' } }),
+      prisma.quote.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      prisma.quote.aggregate({ _sum: { amount: true } }),
+      prisma.quote.aggregate({ where: { status: 'ACCEPTED' }, _sum: { amount: true } }),
+      prisma.quote.groupBy({ by: ['mode'], _count: { _all: true } }),
+    ]);
+
+    const acceptRate = total > 0 ? Math.round((accepted / total) * 100) : 0;
+
+    res.json({
+      total, pending, accepted, refused, expired, revised, last30d,
+      acceptRate,
+      totalAmount: totalAmount._sum.amount || 0,
+      acceptedAmount: acceptedAmount._sum.amount || 0,
+      byMode: byMode.map(r => ({ mode: r.mode, count: r._count._all })),
+    });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/quotes — liste paginée
+router.get('/quotes', async (req, res, next) => {
+  try {
+    const page   = Math.max(1, parseInt(req.query.page) || 1);
+    const limit  = 20;
+    const skip   = (page - 1) * limit;
+    const { status, mode, search } = req.query;
+
+    const where = {};
+    if (status && ['PENDING','ACCEPTED','REFUSED','EXPIRED','REVISED'].includes(status.toUpperCase())) {
+      where.status = status.toUpperCase();
+    }
+    if (mode && ['SIMPLE','DETAILED'].includes(mode.toUpperCase())) {
+      where.mode = mode.toUpperCase();
+    }
+    if (search) {
+      where.OR = [
+        { professional: { user: { firstName: { contains: search, mode: 'insensitive' } } } },
+        { professional: { user: { lastName:  { contains: search, mode: 'insensitive' } } } },
+        { professional: { user: { email:     { contains: search, mode: 'insensitive' } } } },
+        { professional: { companyName: { contains: search, mode: 'insensitive' } } },
+        { project: { title: { contains: search, mode: 'insensitive' } } },
+        { project: { client: { firstName: { contains: search, mode: 'insensitive' } } } },
+        { project: { client: { lastName:  { contains: search, mode: 'insensitive' } } } },
+        { project: { client: { email:     { contains: search, mode: 'insensitive' } } } },
+      ];
+    }
+
+    const [quotes, total] = await Promise.all([
+      prisma.quote.findMany({
+        where, skip, take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true, amount: true, status: true, mode: true,
+          version: true, createdAt: true, expiresAt: true, pdfUrl: true,
+          description: true,
+          _count: { select: { items: true, payments: true } },
+          professional: {
+            select: {
+              id: true, trade: true, companyName: true,
+              user: { select: { firstName: true, lastName: true, email: true } },
+            },
+          },
+          project: {
+            select: {
+              id: true, title: true, tradeNeeded: true, city: true, status: true,
+              client: { select: { id: true, firstName: true, lastName: true, email: true } },
+            },
+          },
+          payments: { select: { id: true, status: true, amount: true, isDeposit: true } },
+        },
+      }),
+      prisma.quote.count({ where }),
+    ]);
+
+    res.json({ quotes, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/quotes/:id — détail complet
+router.get('/quotes/:id', async (req, res, next) => {
+  try {
+    const quote = await prisma.quote.findUnique({
+      where: { id: req.params.id },
+      include: {
+        items: { orderBy: { sortOrder: 'asc' } },
+        payments: { include: { auditLogs: { orderBy: { createdAt: 'desc' }, take: 5 } } },
+        professional: {
+          select: {
+            id: true, trade: true, companyName: true, averageRating: true,
+            user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, city: true } },
+          },
+        },
+        project: {
+          include: {
+            client: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, city: true } },
+          },
+        },
+        parentQuote: { select: { id: true, version: true, amount: true, status: true, createdAt: true } },
+        revisions: {
+          orderBy: { version: 'asc' },
+          select: { id: true, version: true, amount: true, status: true, createdAt: true, description: true },
+        },
+      },
+    });
+
+    if (!quote) return res.status(404).json({ error: 'Devis introuvable' });
+    res.json(quote);
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/admin/quotes/:id/cancel — expirer un devis admin
+router.patch('/quotes/:id/cancel', async (req, res, next) => {
+  try {
+    const quote = await prisma.quote.findUnique({ where: { id: req.params.id } });
+    if (!quote) return res.status(404).json({ error: 'Devis introuvable' });
+    if (!['PENDING', 'REVISED'].includes(quote.status)) {
+      return res.status(400).json({ error: `Impossible d'expirer un devis en statut ${quote.status}` });
+    }
+    const updated = await prisma.quote.update({
+      where: { id: req.params.id },
+      data: { status: 'EXPIRED' },
+    });
+    res.json(updated);
+  } catch (err) { next(err); }
+});
+
+// ══════════════════════════════════════════════════════════════
 // NOTIFICATIONS PUSH
 // ══════════════════════════════════════════════════════════════
 

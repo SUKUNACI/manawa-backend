@@ -1469,12 +1469,12 @@ router.get('/moderation/stats', async (req, res, next) => {
       prisma.contentReport.count({ where: { status: 'PENDING' } }),
       prisma.contentReport.count({ where: { status: 'DISMISSED' } }),
       prisma.contentReport.count({ where: { status: 'REMOVED' } }),
-      prisma.contentReport.groupBy({ by: ['contentType'], _count: { id: true } }),
+      prisma.contentReport.groupBy({ by: ['contentType'], _count: { _all: true } }),
     ]);
     res.json({
       pending, dismissed, removed,
       total: pending + dismissed + removed,
-      byType: Object.fromEntries(byType.map(b => [b.contentType, b._count.id])),
+      byType: Object.fromEntries(byType.map(b => [b.contentType, b._count._all])),
     });
   } catch (err) {
     next(err);
@@ -1574,8 +1574,8 @@ router.get('/analytics', async (req, res, next) => {
     // Clients avec ≥2 projets (fidélisation)
     const clientProjectCounts = await prisma.project.groupBy({
       by: ['clientId'],
-      _count: { id: true },
-      having: { id: { _count: { gt: 1 } } },
+      _count: { _all: true },
+      having: { clientId: { _count: { gt: 1 } } },
     });
     const repeatClients = clientProjectCounts.length;
     const clientsWithProjects = await prisma.user.count({
@@ -1585,8 +1585,8 @@ router.get('/analytics', async (req, res, next) => {
     // ── Top 10 métiers ───────────────────────────────────────
     const tradeStats = await prisma.project.groupBy({
       by: ['tradeNeeded'],
-      _count: { id: true },
-      orderBy: { _count: { id: 'desc' } },
+      _count: { _all: true },
+      orderBy: { _count: { tradeNeeded: 'desc' } },
       take: 10,
     });
 
@@ -1605,10 +1605,10 @@ router.get('/analytics', async (req, res, next) => {
         });
         return {
           trade: t.tradeNeeded,
-          projectCount: t._count.id,
+          projectCount: t._count._all,
           revenue: agg._sum.amount || 0,
           completedCount: completed,
-          completionRate: t._count.id > 0 ? Math.round((completed / t._count.id) * 100) : 0,
+          completionRate: t._count._all > 0 ? Math.round((completed / t._count._all) * 100) : 0,
         };
       })
     );
@@ -1657,8 +1657,8 @@ router.get('/analytics', async (req, res, next) => {
     // ── Répartition géographique ─────────────────────────────
     const cityStats = await prisma.project.groupBy({
       by: ['city'],
-      _count: { id: true },
-      orderBy: { _count: { id: 'desc' } },
+      _count: { _all: true },
+      orderBy: { _count: { city: 'desc' } },
       take: 10,
       where: { city: { not: null } },
     });
@@ -1738,7 +1738,7 @@ router.get('/analytics', async (req, res, next) => {
       avgDaysToFirstQuote,
       tradeStats: tradeRevenue,
       topPros,
-      cityStats: cityStats.map(c => ({ city: c.city, count: c._count.id })),
+      cityStats: cityStats.map(c => ({ city: c.city, count: c._count._all })),
       growthByMonth,
     });
   } catch (err) {
@@ -1984,23 +1984,23 @@ router.get('/market', async (req, res, next) => {
     const [projectsByTrade, prosByTrade] = await Promise.all([
       prisma.project.groupBy({
         by: ['tradeNeeded'],
-        _count: { id: true },
-        orderBy: { _count: { id: 'desc' } },
+        _count: { _all: true },
+        orderBy: { _count: { tradeNeeded: 'desc' } },
         take: 15,
       }),
       prisma.professional.groupBy({
         by: ['trade'],
-        _count: { id: true },
+        _count: { _all: true },
       }),
     ]);
 
-    const prosByTradeMap = Object.fromEntries(prosByTrade.map(p => [p.trade, p._count.id]));
+    const prosByTradeMap = Object.fromEntries(prosByTrade.map(p => [p.trade, p._count._all]));
     const tradeBalance = projectsByTrade.map(t => ({
       trade:    t.tradeNeeded,
-      demand:   t._count.id,
+      demand:   t._count._all,
       supply:   prosByTradeMap[t.tradeNeeded] || 0,
       ratio:    prosByTradeMap[t.tradeNeeded]
-        ? (t._count.id / prosByTradeMap[t.tradeNeeded]).toFixed(2)
+        ? (t._count._all / prosByTradeMap[t.tradeNeeded]).toFixed(2)
         : null,
     }));
 
@@ -2008,9 +2008,9 @@ router.get('/market', async (req, res, next) => {
     const budgetByTrade = await prisma.project.groupBy({
       by: ['tradeNeeded'],
       _avg: { budgetMin: true, budgetMax: true },
-      _count: { id: true },
+      _count: { _all: true },
       where: { budgetMin: { not: null } },
-      orderBy: { _count: { id: 'desc' } },
+      orderBy: { _count: { tradeNeeded: 'desc' } },
       take: 10,
     });
 
@@ -2018,24 +2018,24 @@ router.get('/market', async (req, res, next) => {
     const [cityDemand, citySupply] = await Promise.all([
       prisma.project.groupBy({
         by: ['city'],
-        _count: { id: true },
+        _count: { _all: true },
         where: { status: 'OPEN', city: { not: '' } },
-        orderBy: { _count: { id: 'desc' } },
+        orderBy: { _count: { city: 'desc' } },
         take: 15,
       }),
       prisma.professional.groupBy({
         by: ['city'],
-        _count: { id: true },
+        _count: { _all: true },
         where: { city: { not: null } },
       }).catch(() => []),
     ]);
 
     const citySupplyMap = Object.fromEntries(
-      (citySupply || []).map(c => [c.city, c._count.id])
+      (citySupply || []).map(c => [c.city, c._count._all])
     );
     const cityMarket = cityDemand.map(c => ({
       city:   c.city,
-      demand: c._count.id,
+      demand: c._count._all,
       supply: citySupplyMap[c.city] || 0,
     }));
 
@@ -2102,7 +2102,7 @@ router.get('/market', async (req, res, next) => {
       tradeBalance,
       budgetByTrade: budgetByTrade.map(t => ({
         trade:    t.tradeNeeded,
-        count:    t._count.id,
+        count:    t._count._all,
         avgMin:   Math.round(t._avg.budgetMin || 0),
         avgMax:   Math.round(t._avg.budgetMax || 0),
       })),
@@ -2140,7 +2140,7 @@ router.get('/subscriptions/stats', async (req, res, next) => {
       prisma.subscription.groupBy({
         by: ['tier'],
         where: { status: 'ACTIVE', expiresAt: { gt: now } },
-        _count: { id: true },
+        _count: { _all: true },
       }),
       prisma.subscription.count({ where: { status: 'ACTIVE', expiresAt: { gt: now, lt: in7days } } }),
       prisma.subscription.count({ where: { status: 'ACTIVE', expiresAt: { gt: now, lt: in30days } } }),
@@ -2149,7 +2149,7 @@ router.get('/subscriptions/stats', async (req, res, next) => {
       prisma.professional.count({ where: { trialEndsAt: { gt: now } } }),
     ]);
 
-    const tierMap = Object.fromEntries(byTier.map(t => [t.tier, t._count.id]));
+    const tierMap = Object.fromEntries(byTier.map(t => [t.tier, t._count._all]));
     const estimatedRevenue = Object.entries(SUB_PRICES).reduce((sum, [tier, price]) => {
       return sum + (tierMap[tier] || 0) * price;
     }, 0);
@@ -2434,7 +2434,7 @@ router.get('/communication/stats', async (req, res, next) => {
       prisma.notification.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
       prisma.notification.count({ where: { read: false } }),
       prisma.pushToken.count({ where: { isActive: true } }),
-      prisma.pushToken.groupBy({ by: ['platform'], where: { isActive: true }, _count: { id: true } }),
+      prisma.pushToken.groupBy({ by: ['platform'], where: { isActive: true }, _count: { _all: true } }),
       prisma.broadcastLog.count(),
     ]);
 
@@ -2451,7 +2451,7 @@ router.get('/communication/stats', async (req, res, next) => {
       },
       devices: {
         active: activeDevices,
-        byPlatform: devicesByPlatform.map(d => ({ platform: d.platform, count: d._count.id })),
+        byPlatform: devicesByPlatform.map(d => ({ platform: d.platform, count: d._count._all })),
       },
       broadcasts: {
         total: broadcastCount,

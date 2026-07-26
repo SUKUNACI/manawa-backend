@@ -266,6 +266,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   <div class="nav-item" onclick="showPage('promos',this)"><span class="ni">🎁</span> Codes Promo & Offres</div>
   <div class="nav-item" onclick="showPage('quotes-admin',this)"><span class="ni">📄</span> Devis</div>
   <div class="nav-item" onclick="showPage('push',this)"><span class="ni">🔔</span> Notifications Push</div>
+  <div class="nav-item" onclick="showPage('messaging',this)"><span class="ni">💬</span> Messagerie</div>
   <div class="nav-item" onclick="showPage('communication',this)"><span class="ni">📡</span> Communication</div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
@@ -1689,6 +1690,64 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
 
     </div>
 
+    <!-- ══ PAGE: MESSAGERIE ══ -->
+    <div class="page" id="page-messaging">
+      <div class="kpi-grid">
+        <div class="kpi blue"><div class="kpi-icon">💬</div><div class="kpi-val" id="msg-kpi-total">--</div><div class="kpi-label">Messages total</div></div>
+        <div class="kpi orange"><div class="kpi-icon">🗣️</div><div class="kpi-val" id="msg-kpi-convs">--</div><div class="kpi-label">Conversations totales</div></div>
+        <div class="kpi green"><div class="kpi-icon">📅</div><div class="kpi-val" id="msg-kpi-active">--</div><div class="kpi-label">Convs actives (30j)</div></div>
+        <div class="kpi red"><div class="kpi-icon">🔴</div><div class="kpi-val" id="msg-kpi-unread">--</div><div class="kpi-label">Non lus</div></div>
+      </div>
+
+      <!-- KPIs 7j/30j + top senders -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+        <div style="background:var(--card);border-radius:14px;padding:16px;">
+          <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Volume récent</div>
+          <div style="display:flex;gap:24px;">
+            <div><div class="kpi-val" id="msg-kpi-7d" style="font-size:22px;">--</div><div style="font-size:11px;color:var(--muted);">7 derniers jours</div></div>
+            <div><div class="kpi-val" id="msg-kpi-30d" style="font-size:22px;">--</div><div style="font-size:11px;color:var(--muted);">30 derniers jours</div></div>
+          </div>
+        </div>
+        <div style="background:var(--card);border-radius:14px;padding:16px;">
+          <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Top expéditeurs</div>
+          <div id="msg-top-senders" style="font-size:13px;"></div>
+        </div>
+      </div>
+
+      <!-- Conversations -->
+      <div style="background:var(--card);border-radius:14px;padding:16px;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+          <div style="font-weight:600;font-size:15px;">Conversations</div>
+          <input type="text" id="msg-search" placeholder="Rechercher un utilisateur…" style="padding:8px 14px;border-radius:20px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;width:240px;" oninput="debounceMsgSearch(this.value)">
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table">
+            <thead><tr><th>Participants</th><th>Dernier message</th><th>Msgs</th><th>Non lus</th><th>Date</th><th>Actions</th></tr></thead>
+            <tbody id="msg-conv-tbody"></tbody>
+          </table>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:14px;">
+          <button class="btn btn-view" id="msg-prev" onclick="loadMsgConversations(msgConvPage-1)">← Précédent</button>
+          <span class="page-info" id="msg-page-info"></span>
+          <button class="btn btn-view" id="msg-next" onclick="loadMsgConversations(msgConvPage+1)">Suivant →</button>
+        </div>
+      </div>
+
+      <!-- Thread inline -->
+      <div id="msg-thread-panel" style="display:none;background:var(--card);border-radius:14px;padding:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <div id="msg-thread-title" style="font-weight:600;font-size:15px;"></div>
+          <button class="btn btn-secondary" onclick="closeMsgThread()">✕ Fermer</button>
+        </div>
+        <div id="msg-thread-body" style="max-height:480px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;"></div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:14px;">
+          <button class="btn btn-view" id="msg-thread-prev" onclick="loadMsgThread(msgThreadUserA,msgThreadUserB,msgThreadPage-1)">← Précédent</button>
+          <span class="page-info" id="msg-thread-page-info"></span>
+          <button class="btn btn-view" id="msg-thread-next" onclick="loadMsgThread(msgThreadUserA,msgThreadUserB,msgThreadPage+1)">Suivant →</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ══ PAGE: CODES PROMO & OFFRES ══ -->
     <div class="page" id="page-promos">
       <div class="kpi-grid" id="promos-kpis">
@@ -2179,6 +2238,7 @@ const titles = {
   promos: 'Codes Promo & Offres',
   'quotes-admin': 'Gestion des devis',
   push: 'Notifications Push',
+  messaging: 'Messagerie',
   settings: 'Configuration & Paramètres',
   support: 'Support',
   deleted: 'Comptes supprimés'
@@ -2333,6 +2393,7 @@ function showPage(id, el) {
     case 'promos': loadPromoStats(); loadPromos(1); break;
     case 'quotes-admin': loadQuoteStats(); loadQuotes(1); break;
     case 'push': loadPushStats(); loadPushTokens(1); break;
+    case 'messaging': loadMsgStats(); loadMsgConversations(1); break;
     case 'settings': loadSettings(); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
@@ -6206,6 +6267,169 @@ async function sendTargetedPush() {
     btn.disabled = false;
     btn.textContent = '📤 Envoyer';
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// MESSAGERIE
+// ══════════════════════════════════════════════════════════════
+let msgConvPage = 1, msgConvTotal = 0, msgConvPages = 0;
+let msgThreadUserA = null, msgThreadUserB = null, msgThreadPage = 1;
+let msgSearchTimer = null;
+
+async function loadMsgStats() {
+  try {
+    const d = await apiCall('/api/admin/messaging/stats');
+    document.getElementById('msg-kpi-total').textContent  = d.total.toLocaleString();
+    document.getElementById('msg-kpi-convs').textContent  = d.totalConversations.toLocaleString();
+    document.getElementById('msg-kpi-active').textContent = d.activeConversations.toLocaleString();
+    document.getElementById('msg-kpi-unread').textContent = d.unread.toLocaleString();
+    document.getElementById('msg-kpi-7d').textContent     = d.last7d.toLocaleString();
+    document.getElementById('msg-kpi-30d').textContent    = d.last30d.toLocaleString();
+
+    const topEl = document.getElementById('msg-top-senders');
+    if (d.topSenders && d.topSenders.length) {
+      topEl.innerHTML = d.topSenders.map((s, i) => {
+        const u = s.user || {};
+        const name = u.firstName ? escHtml(u.firstName + ' ' + u.lastName) : '<span style="color:var(--muted)">Inconnu</span>';
+        const badge = u.role === 'PROFESSIONAL'
+          ? '<span class="badge badge-orange" style="font-size:9px;margin-left:4px;">Pro</span>'
+          : '<span class="badge badge-blue" style="font-size:9px;margin-left:4px;">Client</span>';
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);">
+          <span>${i+1}. ${name}${badge}</span>
+          <strong>${s.count}</strong>
+        </div>`;
+      }).join('');
+    } else {
+      topEl.innerHTML = '<span style="color:var(--muted);font-size:12px;">Aucune donnée</span>';
+    }
+  } catch (e) { showToast('Erreur stats messagerie', 'error'); }
+}
+
+async function loadMsgConversations(page) {
+  if (page < 1) return;
+  msgConvPage = page;
+  const search = document.getElementById('msg-search')?.value.trim() || '';
+  const params = new URLSearchParams({ page });
+  if (search) params.set('search', search);
+  try {
+    const d = await apiCall('/api/admin/messaging/conversations?' + params);
+    msgConvTotal = d.total;
+    msgConvPages = d.pages;
+
+    const tbody = document.getElementById('msg-conv-tbody');
+    tbody.innerHTML = '';
+    if (!d.conversations.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px;">Aucune conversation</td></tr>';
+    } else {
+      d.conversations.forEach(c => {
+        const sName = c.sender ? escHtml(c.sender.firstName + ' ' + c.sender.lastName) : '?';
+        const rName = c.receiver ? escHtml(c.receiver.firstName + ' ' + c.receiver.lastName) : '?';
+        const sRole = c.sender?.role === 'PROFESSIONAL'
+          ? '<span class="badge badge-orange" style="font-size:9px;">Pro</span>'
+          : '<span class="badge badge-blue" style="font-size:9px;">Client</span>';
+        const rRole = c.receiver?.role === 'PROFESSIONAL'
+          ? '<span class="badge badge-orange" style="font-size:9px;">Pro</span>'
+          : '<span class="badge badge-blue" style="font-size:9px;">Client</span>';
+        const preview = c.content ? escHtml(c.content.substring(0, 60)) + (c.content.length > 60 ? '…' : '') : '—';
+        const unreadBadge = c.unreadCount > 0
+          ? `<span class="badge badge-red" style="font-size:10px;">${c.unreadCount}</span>`
+          : '<span style="color:var(--muted)">0</span>';
+        const tr = document.createElement('tr');
+        tr.style.cursor = 'pointer';
+        tr.onclick = () => openMsgThread(c.senderId, c.receiverId, sName, rName);
+        tr.innerHTML = `
+          <td><strong>${sName}</strong>${sRole}<br><span style="color:var(--muted);font-size:11px;">→</span> <strong>${rName}</strong>${rRole}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted);">${preview}</td>
+          <td><strong>${c.msgCount || '?'}</strong></td>
+          <td>${unreadBadge}</td>
+          <td style="font-size:12px;color:var(--muted);">${formatDate(c.createdAt)}</td>
+          <td class="td-actions">
+            <button class="btn btn-view" onclick="event.stopPropagation();openMsgThread('${escAttr(c.senderId)}','${escAttr(c.receiverId)}','${escAttr(sName)}','${escAttr(rName)}')">💬 Voir</button>
+          </td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    const pi = document.getElementById('msg-page-info');
+    if (pi) pi.textContent = `Page ${page} / ${msgConvPages || 1}`;
+    const prev = document.getElementById('msg-prev');
+    const next = document.getElementById('msg-next');
+    if (prev) prev.disabled = page <= 1;
+    if (next) next.disabled = page >= msgConvPages;
+  } catch (e) { showToast('Erreur chargement conversations', 'error'); }
+}
+
+function debounceMsgSearch(val) {
+  clearTimeout(msgSearchTimer);
+  msgSearchTimer = setTimeout(() => loadMsgConversations(1), 380);
+}
+
+async function openMsgThread(userA, userB, nameA, nameB) {
+  msgThreadUserA = userA;
+  msgThreadUserB = userB;
+  msgThreadPage  = 1;
+  const panel = document.getElementById('msg-thread-panel');
+  panel.style.display = 'block';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.getElementById('msg-thread-title').textContent = `Conversation : ${nameA} ↔ ${nameB}`;
+  await loadMsgThread(userA, userB, 1);
+}
+
+function closeMsgThread() {
+  document.getElementById('msg-thread-panel').style.display = 'none';
+  msgThreadUserA = null; msgThreadUserB = null;
+}
+
+async function loadMsgThread(userA, userB, page) {
+  if (page < 1) return;
+  msgThreadPage = page;
+  try {
+    const d = await apiCall(`/api/admin/messaging/conversations/${encodeURIComponent(userA)}/${encodeURIComponent(userB)}?page=${page}`);
+    const body = document.getElementById('msg-thread-body');
+    body.innerHTML = '';
+
+    if (!d.messages.length) {
+      body.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px;font-size:13px;">Aucun message</div>';
+    } else {
+      d.messages.forEach(m => {
+        const isA = m.senderId === userA;
+        const sender = isA ? d.userA : d.userB;
+        const sName = sender ? escHtml(sender.firstName + ' ' + sender.lastName) : '?';
+        const bubble = document.createElement('div');
+        bubble.style.cssText = `display:flex;flex-direction:column;align-items:${isA ? 'flex-start' : 'flex-end'};max-width:75%;${isA ? '' : 'align-self:flex-end;'}`;
+        bubble.innerHTML = `
+          <div style="font-size:10px;color:var(--muted);margin-bottom:3px;${isA ? '' : 'text-align:right;'}">${sName} · ${formatDate(m.createdAt)}</div>
+          <div style="background:${isA ? 'var(--card-hover,#2a2a3e)' : 'rgba(99,102,241,0.15)'};border-radius:${isA ? '4px 14px 14px 14px' : '14px 4px 14px 14px'};padding:8px 12px;font-size:13px;color:var(--text);word-break:break-word;position:relative;">
+            ${escHtml(m.content)}
+            <span style="font-size:9px;color:var(--muted);margin-left:6px;">${m.read ? '✓✓' : '✓'}</span>
+            <button onclick="deleteMsgAdmin('${escAttr(m.id)}')" style="position:absolute;top:-6px;right:-6px;background:var(--red);border:none;border-radius:50%;width:16px;height:16px;font-size:9px;color:#fff;cursor:pointer;display:none;" class="msg-del-btn">✕</button>
+          </div>`;
+        bubble.querySelector('.msg-del-btn').style.display = 'none';
+        bubble.onmouseenter = () => bubble.querySelector('.msg-del-btn').style.display = 'block';
+        bubble.onmouseleave = () => bubble.querySelector('.msg-del-btn').style.display = 'none';
+        body.appendChild(bubble);
+      });
+      body.scrollTop = body.scrollHeight;
+    }
+
+    const pages = Math.ceil(d.total / 50) || 1;
+    const pi = document.getElementById('msg-thread-page-info');
+    if (pi) pi.textContent = `Page ${page} / ${pages}`;
+    const prev = document.getElementById('msg-thread-prev');
+    const next = document.getElementById('msg-thread-next');
+    if (prev) prev.disabled = page <= 1;
+    if (next) next.disabled = page >= pages;
+  } catch (e) { showToast('Erreur chargement thread', 'error'); }
+}
+
+async function deleteMsgAdmin(msgId) {
+  if (!confirm('Supprimer ce message définitivement ?')) return;
+  try {
+    await apiCall(`/api/admin/messaging/messages/${encodeURIComponent(msgId)}`, { method: 'DELETE' });
+    showToast('Message supprimé');
+    loadMsgThread(msgThreadUserA, msgThreadUserB, msgThreadPage);
+    loadMsgConversations(msgConvPage);
+  } catch (e) { showToast('Erreur suppression message', 'error'); }
 }
 
 // ══════════════════════════════════════════════════════════════

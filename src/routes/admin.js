@@ -57,6 +57,14 @@ router.get('/dashboard', async (req, res, next) => {
       where: { identityStatus: 'PENDING' },
     });
 
+    // Codes promo actifs
+    const activePromoCodes = await prisma.promoCode.count({
+      where: { active: true },
+    });
+
+    // Réalisations portfolio
+    const totalPortfolioProjects = await prisma.portfolioProject.count();
+
     // 10 derniers utilisateurs inscrits
     const latestUsers = await prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
@@ -98,6 +106,8 @@ router.get('/dashboard', async (req, res, next) => {
       quotes: { total: totalQuotes },
       payments: { total: totalPayments, revenue: totalRevenue },
       subscriptions: { activePremium: activePremiumSubscriptions },
+      promos: { active: activePromoCodes },
+      portfolio: { total: totalPortfolioProjects },
       pendingVerifications,
       latestUsers,
       latestActivities,

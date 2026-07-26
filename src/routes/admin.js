@@ -2214,10 +2214,12 @@ router.get('/subscriptions', async (req, res, next) => {
         where,
         include: {
           professional: {
-            include: {
-              user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+            select: {
+              id: true,
+              trade: true,
+              trialEndsAt: true,
+              user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, city: true } },
             },
-            select: { id: true, trade: true, city: true, trialEndsAt: true, user: true },
           },
         },
         orderBy: { updatedAt: 'desc' },

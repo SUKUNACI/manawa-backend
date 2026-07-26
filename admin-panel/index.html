@@ -261,7 +261,12 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   <div class="topbar">
     <span class="topbar-title" id="page-title">Tableau de bord</span>
     <div class="topbar-actions">
+      <div style="position:relative;">
+        <input id="global-search-input" class="filter-input" placeholder="🔍 Recherche globale…" style="min-width:200px;padding-right:32px;" oninput="debounceGlobalSearch()" onkeydown="if(event.key==='Escape')closeGlobalSearch()" autocomplete="off">
+        <div id="global-search-results" style="display:none;position:absolute;top:calc(100% + 6px);right:0;width:360px;background:var(--dark2);border:1px solid var(--border);border-radius:14px;z-index:200;max-height:400px;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.4);"></div>
+      </div>
       <button class="topbar-btn secondary" onclick="refreshCurrentPage()">↺ Actualiser</button>
+      <button class="topbar-btn secondary" id="topbar-export-btn" onclick="exportCurrentPage()" style="display:none;">⬇ Export CSV</button>
       <button class="topbar-btn primary" id="topbar-pending-btn" onclick="showPage('verif-id',null)" style="display:none;">⚠️ <span id="topbar-pending-count">0</span> en attente</button>
     </div>
   </div>
@@ -826,11 +831,159 @@ function showPage(id, el) {
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
   }
+
+  // Bouton Export CSV — visible sur pros, clients, paiements
+  const exportBtn = document.getElementById('topbar-export-btn');
+  exportBtn.style.display = ['professionals', 'clients', 'payments'].includes(id) ? '' : 'none';
 }
 
 function refreshCurrentPage() {
   showPage(currentPage, null);
   showToast('Données actualisées');
+}
+
+// ══════════════════════════════════════════════════════════════
+// RECHERCHE GLOBALE
+// ══════════════════════════════════════════════════════════════
+let globalSearchTimer = null;
+
+function debounceGlobalSearch() {
+  clearTimeout(globalSearchTimer);
+  const q = document.getElementById('global-search-input').value.trim();
+  if (q.length < 2) { closeGlobalSearch(); return; }
+  globalSearchTimer = setTimeout(() => runGlobalSearch(q), 350);
+}
+
+function closeGlobalSearch() {
+  document.getElementById('global-search-results').style.display = 'none';
+}
+
+async function runGlobalSearch(q) {
+  const box = document.getElementById('global-search-results');
+  box.style.display = 'block';
+  box.innerHTML = '<div class="loading-spinner" style="padding:20px;"></div>';
+
+  try {
+    const [pros, clients, projects] = await Promise.all([
+      apiCall('/admin/professionals?search=' + encodeURIComponent(q) + '&limit=3'),
+      apiCall('/admin/users?role=CLIENT&search=' + encodeURIComponent(q) + '&limit=3'),
+      apiCall('/admin/projects?search=' + encodeURIComponent(q) + '&limit=3'),
+    ]);
+
+    let html = '';
+
+    if (pros.professionals && pros.professionals.length > 0) {
+      html += '<div style="padding:10px 14px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);">Professionnels</div>';
+      pros.professionals.forEach(p => {
+        const u = p.user;
+        html += '<div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);" onmouseenter="this.style.background=\'var(--card)\'" onmouseleave="this.style.background=\'\'" onclick="closeGlobalSearch();showPage(\'professionals\',null);setTimeout(()=>viewProfessional(\'' + p.id + '\'),300)">'
+          + '<strong style="color:var(--white);font-size:13px;">' + escHtml(u.firstName + ' ' + u.lastName) + '</strong>'
+          + '<span style="font-size:11px;color:var(--orange);margin-left:8px;">' + escHtml(p.trade || '') + '</span>'
+          + '<br><span style="font-size:11px;color:var(--muted);">' + escHtml(u.email) + '</span>'
+          + '</div>';
+      });
+    }
+
+    if (clients.users && clients.users.length > 0) {
+      html += '<div style="padding:10px 14px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);">Clients</div>';
+      clients.users.forEach(u => {
+        html += '<div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);" onmouseenter="this.style.background=\'var(--card)\'" onmouseleave="this.style.background=\'\'" onclick="closeGlobalSearch();showPage(\'clients\',null);setTimeout(()=>{document.getElementById(\'clients-search\').value=\'' + escAttr(u.email) + '\';loadClients(1);},300)">'
+          + '<strong style="color:var(--white);font-size:13px;">' + escHtml(u.firstName + ' ' + u.lastName) + '</strong>'
+          + '<br><span style="font-size:11px;color:var(--muted);">' + escHtml(u.email) + (u.city ? ' · ' + escHtml(u.city) : '') + '</span>'
+          + '</div>';
+      });
+    }
+
+    if (projects.projects && projects.projects.length > 0) {
+      html += '<div style="padding:10px 14px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);">Projets</div>';
+      projects.projects.forEach(p => {
+        html += '<div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);" onmouseenter="this.style.background=\'var(--card)\'" onmouseleave="this.style.background=\'\'" onclick="closeGlobalSearch();showPage(\'projects\',null);setTimeout(()=>viewProject(\'' + p.id + '\'),300)">'
+          + '<strong style="color:var(--white);font-size:13px;">' + escHtml(p.title) + '</strong>'
+          + '<span style="margin-left:8px;">' + getProjectStatusBadge(p.status) + '</span>'
+          + '<br><span style="font-size:11px;color:var(--muted);">' + escHtml(p.city || '') + (p.tradeNeeded ? ' · ' + escHtml(p.tradeNeeded) : '') + '</span>'
+          + '</div>';
+      });
+    }
+
+    if (!html) {
+      html = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px;">Aucun résultat pour "' + escHtml(q) + '"</div>';
+    }
+
+    box.innerHTML = html;
+  } catch (err) {
+    box.innerHTML = '<div style="padding:16px;color:var(--red);font-size:13px;">Erreur de recherche</div>';
+  }
+}
+
+// Fermer en cliquant ailleurs
+document.addEventListener('click', e => {
+  if (!e.target.closest('#global-search-input') && !e.target.closest('#global-search-results')) {
+    closeGlobalSearch();
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// EXPORT CSV
+// ══════════════════════════════════════════════════════════════
+async function exportCurrentPage() {
+  try {
+    let rows = [], headers = [], filename = 'export.csv';
+
+    if (currentPage === 'professionals') {
+      showToast('Export en cours…');
+      const data = await apiCall('/admin/professionals?limit=100');
+      headers = ['ID', 'Prénom', 'Nom', 'Email', 'Téléphone', 'Métier', 'Ville', 'Statut ID', 'Premium', 'Inscrit le'];
+      rows = (data.professionals || []).map(p => [
+        p.user.id, p.user.firstName, p.user.lastName, p.user.email, p.user.phone || '',
+        p.trade || '', p.user.city || '', p.identityStatus,
+        p.subscription && p.subscription.status === 'ACTIVE' ? 'Oui' : 'Non',
+        new Date(p.user.createdAt).toLocaleDateString('fr-FR')
+      ]);
+      filename = 'professionnels_' + new Date().toISOString().slice(0,10) + '.csv';
+
+    } else if (currentPage === 'clients') {
+      showToast('Export en cours…');
+      const data = await apiCall('/admin/users?role=CLIENT&limit=100');
+      headers = ['ID', 'Prénom', 'Nom', 'Email', 'Téléphone', 'Ville', 'Statut', 'Inscrit le'];
+      rows = (data.users || []).map(u => [
+        u.id, u.firstName, u.lastName, u.email, u.phone || '',
+        u.city || '', u.suspended ? 'Suspendu' : 'Actif',
+        new Date(u.createdAt).toLocaleDateString('fr-FR')
+      ]);
+      filename = 'clients_' + new Date().toISOString().slice(0,10) + '.csv';
+
+    } else if (currentPage === 'payments') {
+      showToast('Export en cours…');
+      const data = await apiCall('/admin/payments?limit=100&status=succeeded');
+      headers = ['ID', 'Montant (FCFA)', 'Type', 'Statut', 'Professionnel', 'Projet', 'Ref GeniusPay', 'Date'];
+      rows = (data.payments || []).map(p => {
+        const proName = p.quote && p.quote.professional && p.quote.professional.user
+          ? p.quote.professional.user.firstName + ' ' + p.quote.professional.user.lastName : '';
+        const projectTitle = p.quote && p.quote.project ? p.quote.project.title : '';
+        return [
+          p.id, p.amount, p.isDeposit ? 'Acompte 30%' : 'Solde 70%', p.status,
+          proName, projectTitle, p.geniuspayRef || '',
+          new Date(p.createdAt).toLocaleDateString('fr-FR')
+        ];
+      });
+      filename = 'paiements_' + new Date().toISOString().slice(0,10) + '.csv';
+    }
+
+    if (rows.length === 0) { showToast('Aucune donnée à exporter', true); return; }
+
+    const csv = [headers, ...rows].map(r =>
+      r.map(v => '"' + String(v || '').replace(/"/g, '""') + '"').join(',')
+    ).join('\n');
+
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+    showToast('Export téléchargé : ' + filename);
+  } catch (err) {
+    showToast('Erreur export : ' + err.message, true);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════

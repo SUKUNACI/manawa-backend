@@ -283,6 +283,7 @@ model Payment {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   completedAt     DateTime?
+  commissionPaid  Boolean            @default(false)
   quote           Quote              @relation(fields: [quoteId], references: [id])
   auditLogs       PaymentAuditLog[]
 

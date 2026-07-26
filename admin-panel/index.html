@@ -241,6 +241,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   <div class="nav-item" onclick="showPage('projects',this)"><span class="ni">📋</span> Projets</div>
   <div class="nav-item" onclick="showPage('payments',this)"><span class="ni">💰</span> Paiements</div>
   <div class="nav-item" onclick="showPage('audit',this)"><span class="ni">📜</span> Journal d'audit</div>
+  <div class="nav-item" onclick="showPage('finances',this)"><span class="ni">💹</span> Finances & Revenus</div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
     <span class="nav-badge orange" id="badge-support" style="display:none;">0</span>
@@ -570,6 +571,80 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       </div>
     </div>
 
+    <!-- ══ PAGE: FINANCES & REVENUS ══ -->
+    <div class="page" id="page-finances">
+
+      <!-- KPIs financiers -->
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;">
+        <div class="kpi green"><div class="kpi-icon">💰</div><div class="kpi-val" id="fin-total-transactions">--</div><div class="kpi-label">CA transactions total</div></div>
+        <div class="kpi orange"><div class="kpi-icon">📈</div><div class="kpi-val" id="fin-total-commissions">--</div><div class="kpi-label">Commissions MANAWA (8%)</div></div>
+        <div class="kpi red"><div class="kpi-icon">⏳</div><div class="kpi-val" id="fin-commissions-dues">--</div><div class="kpi-label">Commissions dues</div></div>
+        <div class="kpi blue"><div class="kpi-icon">✅</div><div class="kpi-val" id="fin-commissions-percues">--</div><div class="kpi-label">Commissions perçues</div></div>
+      </div>
+
+      <!-- KPI abonnements -->
+      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:24px;">
+        <div class="kpi blue"><div class="kpi-icon">⭐</div><div class="kpi-val" id="fin-active-subs">--</div><div class="kpi-label">Abonnements Premium actifs</div></div>
+        <div class="kpi green"><div class="kpi-icon">🏦</div><div class="kpi-val" id="fin-sub-revenue">--</div><div class="kpi-label">Revenu est. abonnements/mois</div></div>
+        <div class="kpi orange"><div class="kpi-icon">📊</div><div class="kpi-val" id="fin-commission-rate">8%</div><div class="kpi-label">Taux de commission</div></div>
+      </div>
+
+      <!-- Graphique CA mensuel -->
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:20px;padding:20px;margin-bottom:24px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <h3 style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;">Revenus mensuels (12 derniers mois)</h3>
+          <span id="fin-chart-total" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+        <div id="fin-bar-chart" style="display:flex;align-items:flex-end;height:100px;gap:4px;margin-bottom:4px;"></div>
+        <div id="fin-bar-labels" style="display:flex;gap:4px;"></div>
+        <div style="display:flex;gap:24px;margin-top:12px;">
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);"><div style="width:10px;height:10px;border-radius:2px;background:linear-gradient(180deg,var(--green),rgba(34,197,94,0.3))"></div>Transactions</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);"><div style="width:10px;height:10px;border-radius:2px;background:linear-gradient(180deg,var(--orange),rgba(244,114,11,0.3))"></div>Commissions</div>
+        </div>
+      </div>
+
+      <!-- Tableau commissions par pro -->
+      <div class="section-header">
+        <h2>Commissions par professionnel</h2>
+        <div class="sh-actions">
+          <select class="filter-select" id="fin-status-filter" onchange="loadFinancesCommissions(1)" style="width:160px;">
+            <option value="">Tous</option>
+            <option value="due">Commissions dues</option>
+            <option value="paid">Tout réglé</option>
+          </select>
+          <input class="filter-input" id="fin-search" placeholder="🔍 Nom, email..." oninput="debounceFinSearch()" style="width:200px;">
+          <button class="topbar-btn secondary" onclick="exportFinancesCSV()">⬇ CSV</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Professionnel</th>
+              <th>Métier</th>
+              <th>CA total</th>
+              <th>Commission totale</th>
+              <th>Due</th>
+              <th>Perçue</th>
+              <th>Statut</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="fin-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="fin-empty" style="display:none;">
+        <div class="es-icon">💹</div>
+        <p>Aucune transaction enregistrée</p>
+      </div>
+      <div class="pagination" id="fin-pagination" style="display:none;">
+        <button class="btn btn-view" id="fin-prev" onclick="loadFinancesCommissions(finCurrentPage-1)">← Précédent</button>
+        <span class="page-info" id="fin-page-info"></span>
+        <button class="btn btn-view" id="fin-next" onclick="loadFinancesCommissions(finCurrentPage+1)">Suivant →</button>
+      </div>
+    </div>
+
     <!-- ══ PAGE: SUPPORT ══ -->
     <div class="page" id="page-support">
       <div class="filters">
@@ -667,6 +742,16 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   </div>
 </div>
 
+<!-- ══ MODAL: FINANCE DÉTAIL ══ -->
+<div class="modal-overlay" id="modal-fin-detail">
+  <div class="modal" style="width:720px;max-height:85vh;overflow-y:auto;">
+    <div id="fin-detail-body"></div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn btn-view" onclick="closeModal('modal-fin-detail')">Fermer</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ TOAST ══ -->
 <div class="toast" id="toast"><span style="font-size:20px;" id="toast-icon">✅</span><p id="toast-msg">Action réalisée</p></div>
 
@@ -693,6 +778,7 @@ const titles = {
   projects: 'Projets',
   payments: 'Paiements',
   audit: 'Journal d\'audit',
+  finances: 'Finances & Revenus',
   support: 'Support',
   deleted: 'Comptes supprimés'
 };
@@ -828,6 +914,7 @@ function showPage(id, el) {
     case 'projects': loadProjects(1); break;
     case 'payments': loadPayments(1); loadPaymentStats(); break;
     case 'audit': loadAuditLogs(1); break;
+    case 'finances': loadFinances(); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
   }
@@ -1953,6 +2040,218 @@ async function loadPayments(page) {
     if (err.message !== 'Unauthorized') {
       console.error('Payments error:', err);
     }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// FINANCES & REVENUS
+// ══════════════════════════════════════════════════════════════
+let finCurrentPage = 1;
+let finDebounceTimer = null;
+let finSummaryData = null;
+
+function debounceFinSearch() {
+  clearTimeout(finDebounceTimer);
+  finDebounceTimer = setTimeout(() => loadFinancesCommissions(1), 350);
+}
+
+async function loadFinances() {
+  try {
+    const data = await apiCall('/admin/finances/summary');
+    finSummaryData = data;
+
+    document.getElementById('fin-total-transactions').textContent = formatCurrency(data.totalTransactions) + ' FCFA';
+    document.getElementById('fin-total-commissions').textContent = formatCurrency(data.totalCommissions) + ' FCFA';
+    document.getElementById('fin-commissions-dues').textContent = formatCurrency(data.commissionsDues) + ' FCFA';
+    document.getElementById('fin-commissions-percues').textContent = formatCurrency(data.commissionsPercues) + ' FCFA';
+    document.getElementById('fin-active-subs').textContent = formatNumber(data.activeSubscriptions);
+    document.getElementById('fin-sub-revenue').textContent = formatCurrency(data.estimatedSubRevenue) + ' FCFA';
+
+    // Graphique barres double (transactions + commissions)
+    const months = Object.entries(data.revenueByMonth || {});
+    const maxVal = Math.max(...months.map(([,v]) => v.transactions), 1);
+    const totalTx = months.reduce((s,[,v]) => s + v.transactions, 0);
+    const totalCom = months.reduce((s,[,v]) => s + v.commissions, 0);
+    document.getElementById('fin-chart-total').textContent =
+      'CA : ' + formatCurrency(totalTx) + ' | Commissions : ' + formatCurrency(totalCom) + ' FCFA';
+
+    const shortLabels = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+
+    document.getElementById('fin-bar-chart').innerHTML = months.map(([key, v]) => {
+      const txH = Math.max(3, (v.transactions / maxVal) * 100);
+      const comH = Math.max(2, (v.commissions / maxVal) * 100);
+      return '<div style="flex:1;display:flex;align-items:flex-end;gap:1px;">'
+        + '<div style="flex:1;border-radius:4px 4px 0 0;background:linear-gradient(180deg,var(--green),rgba(34,197,94,0.3));height:' + txH + '%;transition:height .5s;" title="' + formatCurrency(v.transactions) + ' FCFA"></div>'
+        + '<div style="flex:1;border-radius:4px 4px 0 0;background:linear-gradient(180deg,var(--orange),rgba(244,114,11,0.3));height:' + comH + '%;transition:height .5s;" title="Commission : ' + formatCurrency(v.commissions) + ' FCFA"></div>'
+        + '</div>';
+    }).join('');
+
+    document.getElementById('fin-bar-labels').innerHTML = months.map(([key]) => {
+      const m = parseInt(key.split('-')[1]) - 1;
+      return '<div style="flex:1;text-align:center;font-size:9px;color:var(--muted);">' + shortLabels[m] + '</div>';
+    }).join('');
+
+  } catch (err) {
+    console.error('Finances summary error:', err);
+  }
+
+  loadFinancesCommissions(1);
+}
+
+async function loadFinancesCommissions(page = 1) {
+  finCurrentPage = page;
+  const status = document.getElementById('fin-status-filter').value;
+  const search = document.getElementById('fin-search').value.trim();
+
+  let url = '/admin/finances/commissions?page=' + page + '&limit=20';
+  if (status) url += '&status=' + status;
+  if (search) url += '&search=' + encodeURIComponent(search);
+
+  try {
+    const data = await apiCall(url);
+    const tbody = document.getElementById('fin-tbody');
+    const empty = document.getElementById('fin-empty');
+    const pagination = document.getElementById('fin-pagination');
+
+    if (!data.professionals || data.professionals.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      pagination.style.display = 'none';
+      return;
+    }
+
+    empty.style.display = 'none';
+
+    tbody.innerHTML = data.professionals.map(pro => {
+      const u = pro.user;
+      const name = escHtml((u.firstName || '') + ' ' + (u.lastName || ''));
+      const isDue = pro.commissionDue > 0;
+      const statusBadge = isDue
+        ? '<span class="badge" style="background:rgba(239,68,68,0.15);color:var(--red);">⏳ ' + formatCurrency(pro.commissionDue) + ' FCFA due</span>'
+        : '<span class="badge" style="background:var(--green-dim);color:var(--green);">✅ Réglé</span>';
+
+      const premiumBadge = pro.subscription && pro.subscription.status === 'ACTIVE'
+        ? '<span class="badge badge-orange" style="font-size:10px;padding:2px 6px;margin-left:4px;">⭐ Premium</span>'
+        : '';
+
+      return '<tr>'
+        + '<td><strong>' + name + '</strong>' + premiumBadge + '<br><span style="font-size:11px;color:var(--muted);">' + escHtml(u.email) + '</span></td>'
+        + '<td>' + escHtml(pro.trade || '-') + '</td>'
+        + '<td style="font-weight:600;">' + formatCurrency(pro.totalTransactions) + ' FCFA</td>'
+        + '<td style="color:var(--orange);font-weight:600;">' + formatCurrency(pro.totalCommission) + ' FCFA</td>'
+        + '<td style="color:var(--red);font-weight:600;">' + formatCurrency(pro.commissionDue) + ' FCFA</td>'
+        + '<td style="color:var(--green);font-weight:600;">' + formatCurrency(pro.commissionPaid) + ' FCFA</td>'
+        + '<td>' + statusBadge + '</td>'
+        + '<td>'
+          + (isDue ? '<button class="btn btn-approve" onclick="markCommissionPaid(\'' + escAttr(pro.professionalId) + '\',\'' + name + '\')" style="font-size:11px;padding:6px 10px;">✅ Marquer payé</button>' : '')
+          + ' <button class="btn btn-view" onclick="viewFinanceDetail(\'' + escAttr(pro.professionalId) + '\')" style="font-size:11px;padding:6px 10px;">📋 Détail</button>'
+        + '</td>'
+        + '</tr>';
+    }).join('');
+
+    // Pagination
+    if (data.totalPages > 1) {
+      pagination.style.display = 'flex';
+      document.getElementById('fin-prev').disabled = page <= 1;
+      document.getElementById('fin-next').disabled = page >= data.totalPages;
+      document.getElementById('fin-page-info').textContent = 'Page ' + page + ' / ' + data.totalPages + ' (' + data.total + ' professionnels)';
+    } else {
+      pagination.style.display = 'none';
+    }
+  } catch (err) {
+    showToast('Erreur chargement commissions : ' + err.message, true);
+  }
+}
+
+async function markCommissionPaid(professionalId, name) {
+  if (!confirm('Marquer toutes les commissions dues de ' + name + ' comme payées ?')) return;
+  try {
+    const res = await apiCall('/admin/finances/commissions/' + professionalId + '/mark-paid', { method: 'PATCH' });
+    showToast('✅ ' + res.count + ' paiement(s) marqué(s) — ' + formatCurrency(res.totalMarked) + ' FCFA perçus');
+    loadFinances();
+  } catch (err) {
+    showToast('Erreur : ' + err.message, true);
+  }
+}
+
+function viewFinanceDetail(professionalId) {
+  if (!finSummaryData) return;
+  // Naviguer vers la page commissions filtrée par ce pro n'est pas possible
+  // On charge le détail depuis les données déjà en mémoire via un appel dédié
+  apiCall('/admin/finances/commissions?search=&limit=100').then(data => {
+    const pro = (data.professionals || []).find(p => p.professionalId === professionalId);
+    if (!pro) { showToast('Données introuvables', true); return; }
+
+    const u = pro.user;
+    const rows = (pro.payments || []).map(p =>
+      '<tr>'
+      + '<td>' + escHtml(p.projectTitle || '-') + '</td>'
+      + '<td>' + (p.isDeposit ? 'Acompte 30%' : 'Solde 70%') + '</td>'
+      + '<td style="font-weight:600;">' + formatCurrency(p.amount) + ' FCFA</td>'
+      + '<td style="color:var(--orange);">' + formatCurrency(p.commission) + ' FCFA</td>'
+      + '<td>' + (p.commissionPaid
+        ? '<span class="badge" style="background:var(--green-dim);color:var(--green);">Payé</span>'
+        : '<span class="badge" style="background:var(--red-dim);color:var(--red);">Dû</span>') + '</td>'
+      + '<td><button class="btn btn-view" onclick="toggleOneCommission(\'' + p.id + '\')" style="font-size:10px;padding:4px 8px;">'
+        + (p.commissionPaid ? '↩ Annuler' : '✅ Marquer') + '</button></td>'
+      + '<td>' + formatDate(p.completedAt || p.createdAt) + '</td>'
+      + '</tr>'
+    ).join('');
+
+    const html = '<h2 style="margin-bottom:12px;">Détail commissions — ' + escHtml((u.firstName||'') + ' ' + (u.lastName||'')) + '</h2>'
+      + '<p style="font-size:12px;color:var(--muted);margin-bottom:16px;">' + escHtml(u.email) + ' · ' + escHtml(pro.trade||'') + '</p>'
+      + '<table><thead><tr><th>Projet</th><th>Type</th><th>Montant</th><th>Commission</th><th>Statut</th><th>Action</th><th>Date</th></tr></thead><tbody>' + rows + '</tbody></table>';
+
+    document.getElementById('fin-detail-body').innerHTML = html;
+    document.getElementById('modal-fin-detail').classList.add('show');
+  }).catch(err => showToast('Erreur : ' + err.message, true));
+}
+
+async function toggleOneCommission(paymentId) {
+  try {
+    const res = await apiCall('/admin/finances/payments/' + paymentId + '/mark-paid', { method: 'PATCH' });
+    showToast(res.commissionPaid ? '✅ Commission marquée payée' : '↩ Commission remise en "due"');
+    // Recharger le détail en restant sur la modale
+    closeModal('modal-fin-detail');
+    loadFinances();
+  } catch (err) {
+    showToast('Erreur : ' + err.message, true);
+  }
+}
+
+async function exportFinancesCSV() {
+  try {
+    showToast('Export en cours…');
+    const data = await apiCall('/admin/finances/commissions?limit=500');
+    const headers = ['Professionnel', 'Email', 'Métier', 'CA Total (FCFA)', 'Commission Totale (FCFA)', 'Due (FCFA)', 'Perçue (FCFA)', 'Statut'];
+    const rows = (data.professionals || []).map(pro => {
+      const u = pro.user;
+      return [
+        (u.firstName || '') + ' ' + (u.lastName || ''),
+        u.email,
+        pro.trade || '',
+        pro.totalTransactions,
+        Math.round(pro.totalCommission),
+        Math.round(pro.commissionDue),
+        Math.round(pro.commissionPaid),
+        pro.commissionDue > 0 ? 'Dû' : 'Réglé',
+      ];
+    });
+
+    if (rows.length === 0) { showToast('Aucune donnée à exporter', true); return; }
+
+    const csv = [headers, ...rows].map(r =>
+      r.map(v => '"' + String(v || '').replace(/"/g, '""') + '"').join(',')
+    ).join('\n');
+
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'commissions_' + new Date().toISOString().slice(0,10) + '.csv'; a.click();
+    URL.revokeObjectURL(url);
+    showToast('Export téléchargé');
+  } catch (err) {
+    showToast('Erreur export : ' + err.message, true);
   }
 }
 

@@ -1174,4 +1174,215 @@ router.patch('/support/tickets/:id/status', async (req, res, next) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// FINANCES & REVENUS
+// ══════════════════════════════════════════════════════════════
+
+const COMMISSION_RATE = 0.08; // 8%
+
+// GET /api/admin/finances/summary — résumé financier global
+router.get('/finances/summary', async (req, res, next) => {
+  try {
+    // Paiements réussis
+    const payments = await prisma.payment.findMany({
+      where: { status: 'succeeded' },
+      include: {
+        quote: {
+          include: {
+            professional: { include: { user: { select: { firstName: true, lastName: true, email: true } } } },
+            project: { select: { title: true } },
+          },
+        },
+      },
+      orderBy: { completedAt: 'desc' },
+    });
+
+    const totalTransactions = payments.reduce((s, p) => s + p.amount, 0);
+    const totalCommissions = totalTransactions * COMMISSION_RATE;
+    const commissionsDues = payments
+      .filter(p => !p.commissionPaid)
+      .reduce((s, p) => s + p.amount * COMMISSION_RATE, 0);
+    const commissionsPercues = payments
+      .filter(p => p.commissionPaid)
+      .reduce((s, p) => s + p.amount * COMMISSION_RATE, 0);
+
+    // Abonnements actifs
+    const activeSubscriptions = await prisma.subscription.count({ where: { status: 'ACTIVE' } });
+    const subRevenue = activeSubscriptions * 5000; // 5 000 FCFA/mois estimé
+
+    // Revenus par mois (12 derniers mois)
+    const now = new Date();
+    const revenueByMonth = {};
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      revenueByMonth[key] = { transactions: 0, commissions: 0 };
+    }
+
+    for (const p of payments) {
+      const d = new Date(p.completedAt || p.createdAt);
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      if (revenueByMonth[key] !== undefined) {
+        revenueByMonth[key].transactions += p.amount;
+        revenueByMonth[key].commissions += p.amount * COMMISSION_RATE;
+      }
+    }
+
+    res.json({
+      commissionRate: COMMISSION_RATE,
+      totalTransactions,
+      totalCommissions,
+      commissionsDues,
+      commissionsPercues,
+      activeSubscriptions,
+      estimatedSubRevenue: subRevenue,
+      revenueByMonth,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/finances/commissions — commissions par professionnel (paginé)
+router.get('/finances/commissions', async (req, res, next) => {
+  try {
+    const { status, search, page = 1, limit = 20 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    // Grouper les paiements réussis par professionnel
+    const allPayments = await prisma.payment.findMany({
+      where: { status: 'succeeded' },
+      include: {
+        quote: {
+          include: {
+            professional: {
+              include: {
+                user: { select: { id: true, firstName: true, lastName: true, email: true, avatarUrl: true, city: true } },
+                subscription: { select: { status: true, tier: true } },
+              },
+            },
+            project: { select: { title: true, id: true } },
+          },
+        },
+      },
+      orderBy: { completedAt: 'desc' },
+    });
+
+    // Construire un index par professionnel
+    const proMap = {};
+    for (const p of allPayments) {
+      const pro = p.quote?.professional;
+      if (!pro) continue;
+      const pid = pro.id;
+      if (!proMap[pid]) {
+        proMap[pid] = {
+          professionalId: pid,
+          user: pro.user,
+          trade: pro.trade,
+          subscription: pro.subscription,
+          totalTransactions: 0,
+          totalCommission: 0,
+          commissionDue: 0,
+          commissionPaid: 0,
+          payments: [],
+        };
+      }
+      const commission = p.amount * COMMISSION_RATE;
+      proMap[pid].totalTransactions += p.amount;
+      proMap[pid].totalCommission += commission;
+      if (p.commissionPaid) {
+        proMap[pid].commissionPaid += commission;
+      } else {
+        proMap[pid].commissionDue += commission;
+      }
+      proMap[pid].payments.push({
+        id: p.id,
+        amount: p.amount,
+        commission,
+        isDeposit: p.isDeposit,
+        commissionPaid: p.commissionPaid,
+        projectTitle: p.quote?.project?.title || '',
+        createdAt: p.createdAt,
+        completedAt: p.completedAt,
+      });
+    }
+
+    let rows = Object.values(proMap);
+
+    // Filtres
+    if (status === 'due') rows = rows.filter(r => r.commissionDue > 0);
+    if (status === 'paid') rows = rows.filter(r => r.commissionDue === 0);
+    if (search) {
+      const q = search.toLowerCase();
+      rows = rows.filter(r =>
+        (r.user.firstName + ' ' + r.user.lastName).toLowerCase().includes(q) ||
+        r.user.email.toLowerCase().includes(q)
+      );
+    }
+
+    // Trier par commission due décroissante
+    rows.sort((a, b) => b.commissionDue - a.commissionDue);
+
+    const total = rows.length;
+    const paged = rows.slice(skip, skip + Number(limit));
+
+    res.json({ professionals: paged, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/finances/commissions/:professionalId/mark-paid — marquer toutes les commissions d'un pro comme payées
+router.patch('/finances/commissions/:professionalId/mark-paid', async (req, res, next) => {
+  try {
+    const { professionalId } = req.params;
+
+    // Récupérer tous les paiements réussis de ce pro avec commissionPaid=false
+    const payments = await prisma.payment.findMany({
+      where: {
+        status: 'succeeded',
+        commissionPaid: false,
+        quote: { professionalId },
+      },
+    });
+
+    if (payments.length === 0) {
+      return res.status(400).json({ error: 'Aucune commission en attente pour ce professionnel' });
+    }
+
+    await prisma.payment.updateMany({
+      where: {
+        status: 'succeeded',
+        commissionPaid: false,
+        quote: { professionalId },
+      },
+      data: { commissionPaid: true },
+    });
+
+    const totalMarked = payments.reduce((s, p) => s + p.amount * COMMISSION_RATE, 0);
+
+    res.json({ success: true, count: payments.length, totalMarked });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/finances/payments/:paymentId/mark-paid — marquer une commission individuelle comme payée
+router.patch('/finances/payments/:paymentId/mark-paid', async (req, res, next) => {
+  try {
+    const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
+    if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
+    if (payment.status !== 'succeeded') return res.status(400).json({ error: 'Seuls les paiements réussis ont des commissions' });
+
+    const updated = await prisma.payment.update({
+      where: { id: req.params.paymentId },
+      data: { commissionPaid: !payment.commissionPaid },
+    });
+
+    res.json({ success: true, commissionPaid: updated.commissionPaid });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

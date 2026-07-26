@@ -484,3 +484,15 @@ model Notification {
   @@index([userId])
   @@index([createdAt])
 }
+
+model BroadcastLog {
+  id           String   @id @default(uuid())
+  adminId      String
+  title        String
+  body         String
+  target       String   // 'ALL' | 'CLIENTS' | 'PROFESSIONALS' | 'USER'
+  targetUserId String?
+  sent         Int      @default(0)
+  total        Int      @default(0)
+  createdAt    DateTime @default(now())
+}

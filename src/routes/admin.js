@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { sendPushNotification } = require('../config/pushNotifications');
+const { sendPushNotification, sendPushToMultiple } = require('../config/pushNotifications');
 const { computeTrustScore, getTrustScoreBreakdown } = require('../utils/trustScore');
 
 const router = express.Router();
@@ -1740,6 +1740,155 @@ router.get('/analytics', async (req, res, next) => {
       topPros,
       cityStats: cityStats.map(c => ({ city: c.city, count: c._count.id })),
       growthByMonth,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
+// COMMUNICATION
+// ──────────────────────────────────────────────────────────────
+
+// GET /api/admin/communication/stats — métriques de communication
+router.get('/communication/stats', async (req, res, next) => {
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      totalMessages,
+      messagesLast30d,
+      activeConversations,
+      totalNotifications,
+      notificationsLast30d,
+      unreadNotifications,
+      activeDevices,
+      devicesByPlatform,
+      broadcastCount,
+    ] = await Promise.all([
+      prisma.message.count(),
+      prisma.message.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      // Conversations uniques (paires expéditeur/destinataire) sur 30j
+      prisma.message.findMany({
+        where: { createdAt: { gte: thirtyDaysAgo } },
+        select: { senderId: true, receiverId: true },
+        distinct: ['senderId', 'receiverId'],
+      }).then(rows => {
+        const pairs = new Set(rows.map(r => [r.senderId, r.receiverId].sort().join('-')));
+        return pairs.size;
+      }),
+      prisma.notification.count(),
+      prisma.notification.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      prisma.notification.count({ where: { read: false } }),
+      prisma.pushToken.count({ where: { isActive: true } }),
+      prisma.pushToken.groupBy({ by: ['platform'], where: { isActive: true }, _count: { id: true } }),
+      prisma.broadcastLog.count(),
+    ]);
+
+    res.json({
+      messages: {
+        total: totalMessages,
+        last30d: messagesLast30d,
+        activeConversations,
+      },
+      notifications: {
+        total: totalNotifications,
+        last30d: notificationsLast30d,
+        unread: unreadNotifications,
+      },
+      devices: {
+        active: activeDevices,
+        byPlatform: devicesByPlatform.map(d => ({ platform: d.platform, count: d._count.id })),
+      },
+      broadcasts: {
+        total: broadcastCount,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/communication/broadcasts — historique des broadcasts
+router.get('/communication/broadcasts', async (req, res, next) => {
+  try {
+    const page  = parseInt(req.query.page)  || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip  = (page - 1) * limit;
+
+    const [logs, total] = await Promise.all([
+      prisma.broadcastLog.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.broadcastLog.count(),
+    ]);
+
+    res.json({ logs, total, page, totalPages: Math.ceil(total / limit) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/communication/broadcast — envoyer une notification push
+router.post('/communication/broadcast', async (req, res, next) => {
+  try {
+    const { title, body, target, targetUserId } = req.body;
+    if (!title || !body) return res.status(400).json({ error: 'Titre et corps requis' });
+    if (!['ALL', 'CLIENTS', 'PROFESSIONALS', 'USER'].includes(target)) {
+      return res.status(400).json({ error: 'Cible invalide' });
+    }
+    if (target === 'USER' && !targetUserId) {
+      return res.status(400).json({ error: 'targetUserId requis pour cible USER' });
+    }
+
+    let userIds = [];
+
+    if (target === 'USER') {
+      const u = await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true } });
+      if (!u) return res.status(404).json({ error: 'Utilisateur introuvable' });
+      userIds = [targetUserId];
+    } else {
+      const where = target === 'ALL' ? {} : { role: target === 'CLIENTS' ? 'CLIENT' : 'PROFESSIONAL' };
+      const users = await prisma.user.findMany({ where, select: { id: true } });
+      userIds = users.map(u => u.id);
+    }
+
+    const result = await sendPushToMultiple(userIds, title, body, { type: 'BROADCAST' });
+
+    // Sauvegarder dans l'historique
+    await prisma.broadcastLog.create({
+      data: {
+        adminId: req.user.id,
+        title,
+        body,
+        target,
+        targetUserId: targetUserId || null,
+        sent: result.sent,
+        total: result.total,
+      },
+    });
+
+    // Sauvegarder en base dans Notification pour chaque destinataire
+    if (userIds.length <= 500) {
+      await prisma.notification.createMany({
+        data: userIds.map(uid => ({
+          userId: uid,
+          type: 'BROADCAST',
+          title,
+          body,
+          read: false,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    res.json({
+      success: true,
+      sent: result.sent,
+      total: result.total,
+      target,
     });
   } catch (err) {
     next(err);

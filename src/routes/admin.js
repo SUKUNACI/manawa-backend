@@ -5,6 +5,7 @@ const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { sendPushNotification, sendPushToMultiple } = require('../config/pushNotifications');
 const { computeTrustScore, getTrustScoreBreakdown } = require('../utils/trustScore');
+const { getConfig, getAllConfig } = require('../utils/appConfig');
 
 const router = express.Router();
 
@@ -1178,11 +1179,11 @@ router.patch('/support/tickets/:id/status', async (req, res, next) => {
 // FINANCES & REVENUS
 // ══════════════════════════════════════════════════════════════
 
-const COMMISSION_RATE = 0.08; // 8%
-
 // GET /api/admin/finances/summary — résumé financier global
 router.get('/finances/summary', async (req, res, next) => {
   try {
+    const COMMISSION_RATE = await getConfig('commission_rate') || 0.08;
+
     // Paiements réussis
     const payments = await prisma.payment.findMany({
       where: { status: 'succeeded' },
@@ -1207,8 +1208,14 @@ router.get('/finances/summary', async (req, res, next) => {
       .reduce((s, p) => s + p.amount * COMMISSION_RATE, 0);
 
     // Abonnements actifs
-    const activeSubscriptions = await prisma.subscription.count({ where: { status: 'ACTIVE' } });
-    const subRevenue = activeSubscriptions * 5000; // 5 000 FCFA/mois estimé
+    const [activeSubscriptions, priceEssentiel, pricePro, priceElite] = await Promise.all([
+      prisma.subscription.count({ where: { status: 'ACTIVE' } }),
+      getConfig('price_essentiel'),
+      getConfig('price_pro'),
+      getConfig('price_elite'),
+    ]);
+    const avgSubPrice = ((priceEssentiel || 2500) + (pricePro || 5000) + (priceElite || 10000)) / 3;
+    const subRevenue = Math.round(activeSubscriptions * avgSubPrice);
 
     // Revenus par mois (12 derniers mois)
     const now = new Date();
@@ -1246,6 +1253,7 @@ router.get('/finances/summary', async (req, res, next) => {
 // GET /api/admin/finances/commissions — commissions par professionnel (paginé)
 router.get('/finances/commissions', async (req, res, next) => {
   try {
+    const COMMISSION_RATE = await getConfig('commission_rate') || 0.08;
     const { status, search, page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
@@ -2543,6 +2551,67 @@ router.post('/communication/broadcast', async (req, res, next) => {
       total: result.total,
       target,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// CONFIGURATION & PARAMÈTRES
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/admin/config — lire tous les paramètres
+router.get('/config', async (req, res, next) => {
+  try {
+    const config = await getAllConfig();
+    res.json(config);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/config — mettre à jour un ou plusieurs paramètres
+router.patch('/config', async (req, res, next) => {
+  try {
+    const updates = req.body; // { key: value, ... }
+    if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+      return res.status(400).json({ error: 'Body doit être un objet { key: value }' });
+    }
+
+    const { DEFAULTS } = require('../utils/appConfig');
+    const results = [];
+
+    for (const [key, value] of Object.entries(updates)) {
+      if (!DEFAULTS[key]) {
+        return res.status(400).json({ error: `Clé inconnue: ${key}` });
+      }
+
+      // Validations métier
+      if (key === 'commission_rate') {
+        const num = parseFloat(value);
+        if (isNaN(num) || num < 0 || num > 0.5) {
+          return res.status(400).json({ error: 'commission_rate doit être entre 0 et 0.5 (50%)' });
+        }
+      }
+      if (['price_essentiel', 'price_pro', 'price_elite'].includes(key)) {
+        const num = parseInt(value);
+        if (isNaN(num) || num < 0) {
+          return res.status(400).json({ error: `${key} doit être un entier positif` });
+        }
+      }
+      if (key === 'app_maintenance_mode' && !['true', 'false'].includes(String(value))) {
+        return res.status(400).json({ error: 'app_maintenance_mode doit être true ou false' });
+      }
+
+      const row = await prisma.appConfig.upsert({
+        where: { key },
+        create: { key, value: String(value), description: DEFAULTS[key].description, updatedBy: req.user.id },
+        update: { value: String(value), updatedBy: req.user.id },
+      });
+      results.push(row);
+    }
+
+    res.json({ success: true, updated: results });
   } catch (err) {
     next(err);
   }

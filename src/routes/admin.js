@@ -1747,6 +1747,170 @@ router.get('/analytics', async (req, res, next) => {
 });
 
 // ──────────────────────────────────────────────────────────────
+// GESTION DES ABONNEMENTS
+// ──────────────────────────────────────────────────────────────
+
+const SUB_PRICES = { ESSENTIEL: 2500, PRO: 5000, ELITE: 10000 };
+
+// GET /api/admin/subscriptions/stats
+router.get('/subscriptions/stats', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const in7days  = new Date(now.getTime() + 7  * 24 * 60 * 60 * 1000);
+    const in30days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      totalActive,
+      byTier,
+      expiringIn7d,
+      expiringIn30d,
+      newLast30d,
+      cancelledLast30d,
+      trialsActive,
+    ] = await Promise.all([
+      prisma.subscription.count({ where: { status: 'ACTIVE', expiresAt: { gt: now } } }),
+      prisma.subscription.groupBy({
+        by: ['tier'],
+        where: { status: 'ACTIVE', expiresAt: { gt: now } },
+        _count: { id: true },
+      }),
+      prisma.subscription.count({ where: { status: 'ACTIVE', expiresAt: { gt: now, lt: in7days } } }),
+      prisma.subscription.count({ where: { status: 'ACTIVE', expiresAt: { gt: now, lt: in30days } } }),
+      prisma.subscription.count({ where: { createdAt: { gte: thirtyDaysAgo }, status: 'ACTIVE' } }),
+      prisma.subscription.count({ where: { updatedAt: { gte: thirtyDaysAgo }, status: 'INACTIVE' } }),
+      prisma.professional.count({ where: { trialEndsAt: { gt: now } } }),
+    ]);
+
+    const tierMap = Object.fromEntries(byTier.map(t => [t.tier, t._count.id]));
+    const estimatedRevenue = Object.entries(SUB_PRICES).reduce((sum, [tier, price]) => {
+      return sum + (tierMap[tier] || 0) * price;
+    }, 0);
+
+    // Évolution mensuelle (12 mois)
+    const monthlyGrowth = {};
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      monthlyGrowth[key] = 0;
+    }
+    const activatedByMonth = await prisma.subscription.findMany({
+      where: { status: 'ACTIVE', startedAt: { not: null } },
+      select: { startedAt: true },
+    });
+    for (const s of activatedByMonth) {
+      const d = new Date(s.startedAt);
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      if (monthlyGrowth[key] !== undefined) monthlyGrowth[key]++;
+    }
+
+    res.json({
+      totalActive,
+      byTier: tierMap,
+      estimatedRevenue,
+      expiringIn7d,
+      expiringIn30d,
+      newLast30d,
+      cancelledLast30d,
+      trialsActive,
+      monthlyGrowth,
+    });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/subscriptions
+router.get('/subscriptions', async (req, res, next) => {
+  try {
+    const { status = '', tier = '', search = '', page = 1, limit = 20 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+    const now  = new Date();
+
+    const where = {};
+    if (status === 'ACTIVE')   { where.status = 'ACTIVE'; where.expiresAt = { gt: now }; }
+    else if (status === 'EXPIRED') { where.OR = [{ status: 'INACTIVE' }, { expiresAt: { lte: now } }]; }
+    else if (status === 'EXPIRING') { where.status = 'ACTIVE'; where.expiresAt = { gt: now, lt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) }; }
+    if (tier) where.tier = tier;
+    if (search) {
+      where.professional = {
+        user: {
+          OR: [
+            { firstName: { contains: search, mode: 'insensitive' } },
+            { lastName:  { contains: search, mode: 'insensitive' } },
+            { email:     { contains: search, mode: 'insensitive' } },
+          ],
+        },
+      };
+    }
+
+    const [subs, total] = await Promise.all([
+      prisma.subscription.findMany({
+        where,
+        include: {
+          professional: {
+            include: {
+              user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+            },
+            select: { id: true, trade: true, city: true, trialEndsAt: true, user: true },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+        skip,
+        take: Number(limit),
+      }),
+      prisma.subscription.count({ where }),
+    ]);
+
+    res.json({ subscriptions: subs, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/admin/subscriptions/:professionalId — activer / changer tier / annuler
+router.patch('/subscriptions/:professionalId', async (req, res, next) => {
+  try {
+    const { action, tier } = req.body;
+    const proId = req.params.professionalId;
+
+    const pro = await prisma.professional.findUnique({ where: { id: proId }, include: { subscription: true } });
+    if (!pro) return res.status(404).json({ error: 'Professionnel introuvable' });
+
+    if (action === 'activate') {
+      if (!tier || !['ESSENTIEL', 'PRO', 'ELITE'].includes(tier)) return res.status(400).json({ error: 'Tier invalide' });
+      const expiresAt = new Date();
+      expiresAt.setMonth(expiresAt.getMonth() + 1);
+      const updated = await prisma.subscription.upsert({
+        where: { professionalId: proId },
+        create: { professionalId: proId, tier, status: 'ACTIVE', startedAt: new Date(), expiresAt },
+        update: { tier, status: 'ACTIVE', startedAt: new Date(), expiresAt },
+      });
+      return res.json({ success: true, subscription: updated });
+    }
+
+    if (action === 'cancel') {
+      const updated = await prisma.subscription.update({
+        where: { professionalId: proId },
+        data: { status: 'INACTIVE' },
+      });
+      return res.json({ success: true, subscription: updated });
+    }
+
+    if (action === 'extend') {
+      if (!pro.subscription) return res.status(400).json({ error: 'Aucun abonnement actif' });
+      const base = pro.subscription.expiresAt && new Date(pro.subscription.expiresAt) > new Date()
+        ? new Date(pro.subscription.expiresAt)
+        : new Date();
+      base.setMonth(base.getMonth() + 1);
+      const updated = await prisma.subscription.update({
+        where: { professionalId: proId },
+        data: { expiresAt: base, status: 'ACTIVE' },
+      });
+      return res.json({ success: true, subscription: updated });
+    }
+
+    return res.status(400).json({ error: 'Action invalide (activate | cancel | extend)' });
+  } catch (err) { next(err); }
+});
+
+// ──────────────────────────────────────────────────────────────
 // LITIGES & REMBOURSEMENTS
 // ──────────────────────────────────────────────────────────────
 

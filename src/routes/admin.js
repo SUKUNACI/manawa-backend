@@ -214,6 +214,8 @@ router.get('/users/:id', async (req, res, next) => {
 // PATCH /api/admin/users/:id — modifier les infos de base
 router.patch('/users/:id', async (req, res, next) => {
   try {
+    // Le rôle ADMIN ne peut jamais être assigné via l'API — uniquement en base directement
+    if (req.body.role === 'ADMIN') return res.status(403).json({ error: 'Promotion au rôle ADMIN interdite via l\'API' });
     const { firstName, lastName, email, city, phone } = req.body;
 
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });

@@ -59,6 +59,10 @@ router.post(
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
       const { email, password, firstName, lastName, role, phone, city, trades, accountType, companyName } = req.body;
+
+      // Le rôle ADMIN ne peut jamais être créé via l'API publique
+      const safeRole = role === 'PROFESSIONAL' ? 'PROFESSIONAL' : 'CLIENT';
+
       const tradesArray = Array.isArray(trades) && trades.length > 0 ? trades.slice(0, 3) : ['Non spécifié'];
 
       const existing = await prisma.user.findUnique({ where: { email } });
@@ -74,9 +78,9 @@ router.post(
           lastName,
           phone,
           city,
-          role,
+          role: safeRole,
           professional:
-            role === 'PROFESSIONAL'
+            safeRole === 'PROFESSIONAL'
               ? { create: { trade: tradesArray[0], trades: tradesArray, accountType: accountType || 'INDEPENDENT', companyName: accountType === 'ENTREPRISE' ? companyName : undefined } }
               : undefined,
         },

@@ -262,6 +262,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     <span class="nav-badge red" id="badge-reviews" style="display:none;">0</span>
   </div>
   <div class="nav-item" onclick="showPage('companies',this)"><span class="ni">🏢</span> Entreprises</div>
+  <div class="nav-item" onclick="showPage('portfolio',this)"><span class="ni">🖼️</span> Portfolios & Réalisations</div>
   <div class="nav-item" onclick="showPage('communication',this)"><span class="ni">📡</span> Communication</div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
@@ -1508,6 +1509,42 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     </div>
 
     <!-- ══ PAGE: COMPTES SUPPRIMÉS ══ -->
+    <!-- ══ PAGE: PORTFOLIOS & RÉALISATIONS ══ -->
+    <div class="page" id="page-portfolio">
+      <div class="kpi-grid" id="portfolio-kpis">
+        <div class="kpi blue"><div class="kpi-icon">🖼️</div><div class="kpi-val" id="pf-projects">--</div><div class="kpi-label">Réalisations publiées</div></div>
+        <div class="kpi orange"><div class="kpi-icon">❤️</div><div class="kpi-val" id="pf-likes">--</div><div class="kpi-label">J'aime total</div></div>
+        <div class="kpi green"><div class="kpi-icon">💬</div><div class="kpi-val" id="pf-comments">--</div><div class="kpi-label">Commentaires</div></div>
+        <div class="kpi red"><div class="kpi-icon">📸</div><div class="kpi-val" id="pf-items">--</div><div class="kpi-label">Photos portfolio (ancien)</div></div>
+      </div>
+      <div id="pf-top-alert" style="display:none;background:rgba(232,184,75,0.08);border:1px solid rgba(232,184,75,0.2);border-radius:14px;padding:14px 18px;margin-bottom:16px;font-size:13px;color:var(--gold);"></div>
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Rechercher une réalisation, pro, catégorie…" id="pf-search" oninput="debouncePf()">
+        <select class="filter-select" id="pf-cat-filter" onchange="loadPortfolioProjects(1)">
+          <option value="">Toutes catégories</option>
+          <option>Maçonnerie</option><option>Électricité</option><option>Plomberie</option>
+          <option>Peinture</option><option>Carrelage</option><option>Menuiserie</option>
+          <option>Charpente / Toiture</option><option>Isolation</option><option>Climatisation / VMC</option>
+          <option>Paysagisme</option><option>Démolition</option><option>Autre</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Aperçu</th><th>Titre</th><th>Catégorie</th><th>Professionnel</th><th>Ville</th><th>J'aime</th><th>Commentaires</th><th>Photos</th><th>Publié le</th><th>Actions</th></tr></thead>
+          <tbody id="pf-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="pf-empty" style="display:none;">
+        <div class="es-icon">🖼️</div>
+        <p>Aucune réalisation trouvée</p>
+      </div>
+      <div class="pagination" id="pf-pagination" style="display:none;">
+        <button class="btn btn-view" id="pf-prev" onclick="loadPortfolioProjects(pfCurrentPage-1)">← Précédent</button>
+        <span class="page-info" id="pf-page-info"></span>
+        <button class="btn btn-view" id="pf-next" onclick="loadPortfolioProjects(pfCurrentPage+1)">Suivant →</button>
+      </div>
+    </div>
+
     <!-- ══ PAGE: ENTREPRISES ══ -->
     <div class="page" id="page-companies">
       <div class="kpi-grid" id="companies-kpis">
@@ -1633,6 +1670,43 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   </div>
 </div>
 
+<!-- ══ MODAL: DÉTAIL RÉALISATION ══ -->
+<div class="modal-overlay" id="modal-portfolio-project">
+  <div class="modal" style="width:760px;max-height:90vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+      <div>
+        <h2 id="pf-modal-title" style="margin-bottom:4px;"></h2>
+        <p id="pf-modal-meta" style="margin:0;font-size:13px;color:var(--muted);"></p>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0;">
+        <button class="btn btn-reject" id="pf-modal-delete-btn" onclick="deletePortfolioProject()">🗑️ Supprimer</button>
+        <button class="btn btn-view" onclick="closeModal('modal-portfolio-project')">✕ Fermer</button>
+      </div>
+    </div>
+
+    <!-- Galerie photos -->
+    <div id="pf-modal-gallery" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:20px;"></div>
+
+    <!-- Description -->
+    <div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:20px;">
+      <p id="pf-modal-desc" style="font-size:13px;color:var(--light);line-height:1.7;margin:0;"></p>
+    </div>
+
+    <!-- Stats rapides -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;" id="pf-modal-stats"></div>
+
+    <!-- Commentaires -->
+    <div class="section-header" style="margin-bottom:12px;">
+      <h2 style="font-size:15px;">💬 Commentaires (<span id="pf-modal-comment-count">0</span>)</h2>
+    </div>
+    <div id="pf-modal-comments-list"></div>
+    <div class="empty-state" id="pf-modal-no-comments" style="display:none;">
+      <div class="es-icon">💬</div>
+      <p>Aucun commentaire</p>
+    </div>
+  </div>
+</div>
+
 <!-- ══ MODAL: DÉTAIL ENTREPRISE ══ -->
 <div class="modal-overlay" id="modal-company">
   <div class="modal" style="width:720px;max-height:88vh;overflow-y:auto;">
@@ -1696,6 +1770,7 @@ const titles = {
   communication: 'Communication',
   reviews: 'Avis & Notation',
   companies: 'Gestion des entreprises',
+  portfolio: 'Portfolios & Réalisations',
   settings: 'Configuration & Paramètres',
   support: 'Support',
   deleted: 'Comptes supprimés'
@@ -1846,6 +1921,7 @@ function showPage(id, el) {
     case 'communication': loadCommunication(); break;
     case 'reviews': loadReviewStats(); loadReviews(1); break;
     case 'companies': loadCompanyStats(); loadCompanies(1); break;
+    case 'portfolio': loadPortfolioStats(); loadPortfolioProjects(1); break;
     case 'settings': loadSettings(); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
@@ -5088,6 +5164,235 @@ async function reviewModalDelete() {
     loadReviewStats();
   }
 })();
+
+// ══════════════════════════════════════════════════════════════
+// PORTFOLIOS & RÉALISATIONS
+// ══════════════════════════════════════════════════════════════
+let pfCurrentPage = 1;
+let pfSearchTimer = null;
+let _currentPfProjectId = null;
+
+async function loadPortfolioStats() {
+  try {
+    const s = await apiCall('/admin/portfolio/stats');
+    document.getElementById('pf-projects').textContent = s.totalProjects ?? '--';
+    document.getElementById('pf-likes').textContent = s.totalLikes ?? '--';
+    document.getElementById('pf-comments').textContent = s.totalComments ?? '--';
+    document.getElementById('pf-items').textContent = s.totalItems ?? '--';
+
+    const topAlert = document.getElementById('pf-top-alert');
+    if (s.topProject) {
+      const pName = s.topProject.professional?.user
+        ? s.topProject.professional.user.firstName + ' ' + s.topProject.professional.user.lastName
+        : 'Inconnu';
+      topAlert.innerHTML = '🏆 Réalisation la plus aimée : <strong>' + escHtml(s.topProject.title) + '</strong> par ' + escHtml(pName) + ' — ' + s.topProject._count.likes + ' j\'aime · ' + s.topProject._count.comments + ' commentaires';
+      topAlert.style.display = '';
+    }
+  } catch(e) {}
+}
+
+async function loadPortfolioProjects(page) {
+  page = Math.max(1, page || 1);
+  const search = document.getElementById('pf-search').value.trim();
+  const cat = document.getElementById('pf-cat-filter').value;
+  const tbody = document.getElementById('pf-tbody');
+  const empty = document.getElementById('pf-empty');
+  const pag = document.getElementById('pf-pagination');
+  tbody.innerHTML = '<tr><td colspan="10"><div class="loading-spinner"></div></td></tr>';
+
+  try {
+    let url = '/admin/portfolio/projects?page=' + page;
+    if (search) url += '&search=' + encodeURIComponent(search);
+    if (cat) url += '&category=' + encodeURIComponent(cat);
+    const data = await apiCall(url);
+    pfCurrentPage = data.page;
+    tbody.innerHTML = '';
+
+    if (!data.projects || data.projects.length === 0) {
+      empty.style.display = '';
+      pag.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+
+    data.projects.forEach(p => {
+      const proName = p.professional ? p.professional.user.firstName + ' ' + p.professional.user.lastName : '—';
+      const thumb = p.images && p.images.length > 0
+        ? `<img src="${escHtml(p.images[0].imageUrl)}" style="width:48px;height:48px;object-fit:cover;border-radius:8px;border:1px solid var(--border);">`
+        : '<div style="width:48px;height:48px;background:var(--dark4);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;">🖼️</div>';
+
+      tbody.innerHTML += `<tr>
+        <td>${thumb}</td>
+        <td><strong>${escHtml(p.title)}</strong></td>
+        <td><span class="badge badge-blue">${escHtml(p.tradeCategory || '—')}</span></td>
+        <td>
+          <strong>${escHtml(proName)}</strong><br>
+          <span style="font-size:11px;color:var(--muted);">${escHtml(p.professional?.user?.email || '')}</span>
+        </td>
+        <td>${escHtml(p.professional?.user?.city || '—')}</td>
+        <td style="color:var(--red);">❤️ ${p._count.likes}</td>
+        <td style="color:var(--blue);">💬 ${p._count.comments}</td>
+        <td>📸 ${p._count.images}</td>
+        <td style="font-size:11px;color:var(--muted);">${new Date(p.createdAt).toLocaleDateString('fr-FR')}</td>
+        <td class="td-actions">
+          <button class="btn btn-view" onclick="openPortfolioModal('${p.id}')">🔍 Voir</button>
+          <button class="btn btn-reject" onclick="confirmDeletePortfolio('${p.id}', ${JSON.stringify(p.title)})">🗑️</button>
+        </td>
+      </tr>`;
+    });
+
+    pag.style.display = data.pages > 1 ? 'flex' : 'none';
+    document.getElementById('pf-page-info').textContent = 'Page ' + data.page + ' / ' + data.pages + ' — ' + data.total + ' réalisation(s)';
+    document.getElementById('pf-prev').disabled = data.page <= 1;
+    document.getElementById('pf-next').disabled = data.page >= data.pages;
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--red);">Erreur de chargement</td></tr>';
+  }
+}
+
+function debouncePf() {
+  clearTimeout(pfSearchTimer);
+  pfSearchTimer = setTimeout(() => loadPortfolioProjects(1), 350);
+}
+
+async function openPortfolioModal(projectId) {
+  _currentPfProjectId = projectId;
+  const overlay = document.getElementById('modal-portfolio-project');
+  overlay.classList.add('show');
+  document.getElementById('pf-modal-title').textContent = 'Chargement…';
+  document.getElementById('pf-modal-meta').textContent = '';
+  document.getElementById('pf-modal-gallery').innerHTML = '<div class="loading-spinner"></div>';
+  document.getElementById('pf-modal-desc').textContent = '';
+  document.getElementById('pf-modal-stats').innerHTML = '';
+  document.getElementById('pf-modal-comments-list').innerHTML = '';
+  document.getElementById('pf-modal-no-comments').style.display = 'none';
+
+  try {
+    const p = await apiCall('/admin/portfolio/projects/' + projectId);
+    const proName = p.professional
+      ? (p.professional.companyName || p.professional.user.firstName + ' ' + p.professional.user.lastName)
+      : '—';
+
+    document.getElementById('pf-modal-title').textContent = '🖼️ ' + p.title;
+    document.getElementById('pf-modal-meta').textContent =
+      escHtml(p.tradeCategory || '') + ' • par ' + proName +
+      ' (' + (p.professional?.user?.city || '—') + ')' +
+      ' • ' + new Date(p.createdAt).toLocaleDateString('fr-FR');
+    document.getElementById('pf-modal-delete-btn').setAttribute('data-id', p.id);
+
+    // Galerie
+    const gallery = document.getElementById('pf-modal-gallery');
+    if (p.images && p.images.length > 0) {
+      gallery.innerHTML = p.images.map(img =>
+        `<img src="${escHtml(img.imageUrl)}" style="height:160px;min-width:200px;object-fit:cover;border-radius:12px;border:1px solid var(--border);cursor:pointer;" onclick="viewDocImage('${escHtml(img.imageUrl)}','Photo')"`+ `>`
+      ).join('');
+    } else {
+      gallery.innerHTML = '<div style="color:var(--muted);font-size:13px;">Aucune photo</div>';
+    }
+
+    // Description
+    document.getElementById('pf-modal-desc').textContent = p.description || 'Aucune description';
+
+    // Stats
+    document.getElementById('pf-modal-stats').innerHTML = `
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;text-align:center;">
+        <div style="font-size:24px;margin-bottom:4px;">❤️</div>
+        <div style="font-size:22px;font-weight:800;color:var(--white);">${p.likes.length}</div>
+        <div style="font-size:11px;color:var(--muted);">J'aime</div>
+      </div>
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;text-align:center;">
+        <div style="font-size:24px;margin-bottom:4px;">💬</div>
+        <div style="font-size:22px;font-weight:800;color:var(--white);">${p.comments.length}</div>
+        <div style="font-size:11px;color:var(--muted);">Commentaires</div>
+      </div>
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;text-align:center;">
+        <div style="font-size:24px;margin-bottom:4px;">📸</div>
+        <div style="font-size:22px;font-weight:800;color:var(--white);">${p.images.length}</div>
+        <div style="font-size:11px;color:var(--muted);">Photos</div>
+      </div>
+    `;
+
+    // Commentaires
+    const commentCount = p.comments.reduce((acc, c) => acc + 1 + (c.replies?.length || 0), 0);
+    document.getElementById('pf-modal-comment-count').textContent = commentCount;
+
+    if (p.comments.length === 0) {
+      document.getElementById('pf-modal-no-comments').style.display = '';
+    } else {
+      const list = document.getElementById('pf-modal-comments-list');
+      list.innerHTML = '';
+      p.comments.forEach(c => {
+        const author = c.author ? c.author.firstName + ' ' + c.author.lastName : 'Inconnu';
+        const ratingStars = c.rating ? '⭐'.repeat(c.rating) : '';
+        let html = `<div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+            <div>
+              <strong style="font-size:13px;color:var(--white);">${escHtml(author)}</strong>
+              ${ratingStars ? `<span style="margin-left:8px;font-size:12px;">${ratingStars}</span>` : ''}
+              <span style="font-size:11px;color:var(--muted);margin-left:8px;">${new Date(c.createdAt).toLocaleDateString('fr-FR')}</span>
+            </div>
+            <button class="btn btn-reject" style="padding:4px 10px;font-size:11px;" onclick="deletePortfolioComment('${c.id}','${p.id}')">🗑️</button>
+          </div>
+          <p style="font-size:13px;color:var(--light);margin:0;">${escHtml(c.content)}</p>`;
+
+        if (c.replies && c.replies.length > 0) {
+          c.replies.forEach(r => {
+            const rAuthor = r.author ? r.author.firstName + ' ' + r.author.lastName : 'Inconnu';
+            html += `<div style="margin-top:8px;padding-left:14px;border-left:2px solid var(--border);">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <strong style="font-size:12px;color:var(--muted);">↩ ${escHtml(rAuthor)}</strong>
+                <button class="btn btn-reject" style="padding:3px 8px;font-size:10px;" onclick="deletePortfolioComment('${r.id}','${p.id}')">🗑️</button>
+              </div>
+              <p style="font-size:12px;color:var(--light);margin:0;">${escHtml(r.content)}</p>
+            </div>`;
+          });
+        }
+        html += '</div>';
+        list.innerHTML += html;
+      });
+    }
+  } catch(e) {
+    document.getElementById('pf-modal-title').textContent = 'Erreur de chargement';
+  }
+}
+
+async function deletePortfolioProject() {
+  const id = _currentPfProjectId;
+  if (!id) return;
+  if (!confirm('Supprimer cette réalisation et toutes ses photos / commentaires ?')) return;
+  try {
+    await apiCall('/admin/portfolio/projects/' + id, { method: 'DELETE' });
+    closeModal('modal-portfolio-project');
+    showToast('Réalisation supprimée');
+    loadPortfolioProjects(pfCurrentPage);
+    loadPortfolioStats();
+  } catch(e) {
+    showToast('Erreur : ' + e.message, true);
+  }
+}
+
+async function confirmDeletePortfolio(id, title) {
+  if (!confirm('Supprimer la réalisation "' + title + '" ?')) return;
+  try {
+    await apiCall('/admin/portfolio/projects/' + id, { method: 'DELETE' });
+    showToast('Réalisation supprimée');
+    loadPortfolioProjects(pfCurrentPage);
+    loadPortfolioStats();
+  } catch(e) {
+    showToast('Erreur : ' + e.message, true);
+  }
+}
+
+async function deletePortfolioComment(commentId, projectId) {
+  if (!confirm('Supprimer ce commentaire ?')) return;
+  try {
+    await apiCall('/admin/portfolio/comments/' + commentId, { method: 'DELETE' });
+    showToast('Commentaire supprimé');
+    openPortfolioModal(projectId); // recharger le modal
+  } catch(e) {
+    showToast('Erreur : ' + e.message, true);
+  }
+}
 
 // ══════════════════════════════════════════════════════════════
 // GESTION DES ENTREPRISES

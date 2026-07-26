@@ -2961,4 +2961,143 @@ router.patch('/reviews/:id/flag', async (req, res, next) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// PORTFOLIOS & RÉALISATIONS
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/admin/portfolio/stats
+router.get('/portfolio/stats', async (req, res, next) => {
+  try {
+    const [totalProjects, totalLikes, totalComments, totalItems, topProject] = await Promise.all([
+      prisma.portfolioProject.count(),
+      prisma.portfolioProjectLike.count(),
+      prisma.portfolioComment.count(),
+      prisma.portfolioItem.count(),
+      prisma.portfolioProject.findFirst({
+        orderBy: { likes: { _count: 'desc' } },
+        select: {
+          id: true, title: true,
+          _count: { select: { likes: true, comments: true } },
+          professional: { select: { user: { select: { firstName: true, lastName: true } } } },
+        },
+      }),
+    ]);
+
+    res.json({ totalProjects, totalLikes, totalComments, totalItems, topProject });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/portfolio/projects — liste paginée
+router.get('/portfolio/projects', async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = 20;
+    const skip = (page - 1) * limit;
+    const { search, category } = req.query;
+
+    const where = {};
+    if (category) where.tradeCategory = category;
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { professional: { user: { firstName: { contains: search, mode: 'insensitive' } } } },
+        { professional: { user: { lastName: { contains: search, mode: 'insensitive' } } } },
+        { professional: { companyName: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [projects, total] = await Promise.all([
+      prisma.portfolioProject.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          tradeCategory: true,
+          createdAt: true,
+          _count: { select: { likes: true, comments: true, images: true } },
+          images: { take: 1, orderBy: { sortOrder: 'asc' }, select: { imageUrl: true } },
+          professional: {
+            select: {
+              id: true, trade: true,
+              user: { select: { firstName: true, lastName: true, email: true, city: true } },
+            },
+          },
+        },
+      }),
+      prisma.portfolioProject.count({ where }),
+    ]);
+
+    res.json({ projects, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/portfolio/projects/:id — détail complet
+router.get('/portfolio/projects/:id', async (req, res, next) => {
+  try {
+    const project = await prisma.portfolioProject.findUnique({
+      where: { id: req.params.id },
+      include: {
+        images: { orderBy: { sortOrder: 'asc' } },
+        likes: { select: { id: true } },
+        comments: {
+          where: { parentId: null },
+          orderBy: { createdAt: 'desc' },
+          include: {
+            author: { select: { firstName: true, lastName: true, avatarUrl: true, role: true } },
+            replies: {
+              orderBy: { createdAt: 'asc' },
+              include: { author: { select: { firstName: true, lastName: true, avatarUrl: true, role: true } } },
+            },
+          },
+        },
+        professional: {
+          select: {
+            id: true, trade: true, averageRating: true,
+            companyName: true,
+            user: { select: { firstName: true, lastName: true, email: true, city: true, avatarUrl: true } },
+          },
+        },
+      },
+    });
+
+    if (!project) return res.status(404).json({ error: 'Réalisation non trouvée' });
+    res.json(project);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/admin/portfolio/projects/:id — supprimer réalisation (cascade)
+router.delete('/portfolio/projects/:id', async (req, res, next) => {
+  try {
+    const project = await prisma.portfolioProject.findUnique({ where: { id: req.params.id } });
+    if (!project) return res.status(404).json({ error: 'Réalisation non trouvée' });
+    await prisma.portfolioProject.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/admin/portfolio/comments/:id — supprimer un commentaire
+router.delete('/portfolio/comments/:id', async (req, res, next) => {
+  try {
+    const comment = await prisma.portfolioComment.findUnique({ where: { id: req.params.id } });
+    if (!comment) return res.status(404).json({ error: 'Commentaire non trouvé' });
+    await prisma.portfolioComment.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

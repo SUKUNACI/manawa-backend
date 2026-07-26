@@ -2449,9 +2449,9 @@ function showPage(id, el) {
     case 'deleted': loadDeletedUsers(1); break;
   }
 
-  // Bouton Export CSV — visible sur pros, clients, paiements
+  // Bouton Export CSV — visible sur pros, clients, paiements, finances
   const exportBtn = document.getElementById('topbar-export-btn');
-  exportBtn.style.display = ['professionals', 'clients', 'payments'].includes(id) ? '' : 'none';
+  exportBtn.style.display = ['professionals', 'clients', 'payments', 'finances'].includes(id) ? '' : 'none';
 }
 
 function refreshCurrentPage() {
@@ -2584,6 +2584,10 @@ async function exportCurrentPage() {
         ];
       });
       filename = 'paiements_' + new Date().toISOString().slice(0,10) + '.csv';
+
+    } else if (currentPage === 'finances') {
+      exportFinancesCSV();
+      return;
     }
 
     if (rows.length === 0) { showToast('Aucune donnée à exporter', true); return; }
@@ -4121,34 +4125,59 @@ async function toggleOneCommission(paymentId) {
 async function exportFinancesCSV() {
   try {
     showToast('Export en cours…');
-    const data = await apiCall('/admin/finances/commissions?limit=1000');
-    const headers = ['Professionnel', 'Email', 'Métier', 'CA Total (FCFA)', 'Commission Totale (FCFA)', 'Due (FCFA)', 'Perçue (FCFA)', 'Statut'];
-    const rows = (data.professionals || []).map(pro => {
+
+    // Respecter les filtres actifs dans la page
+    const status   = document.getElementById('fin-status-filter')?.value || '';
+    const search   = document.getElementById('fin-search')?.value.trim() || '';
+    const params   = new URLSearchParams({ limit: 5000 });
+    if (status) params.set('status', status);
+    if (search) params.set('search', search);
+
+    const data = await apiCall('/admin/finances/commissions?' + params);
+    const pros = data.professionals || [];
+
+    if (pros.length === 0) { showToast('Aucune donnée à exporter', true); return; }
+
+    const headers = [
+      'Professionnel', 'Email', 'Ville', 'Métier', 'Premium',
+      'Nb transactions', 'CA Total (FCFA)',
+      'Commission Totale (FCFA)', 'Commission Due (FCFA)', 'Commission Perçue (FCFA)',
+      'Statut', 'Dernier paiement',
+    ];
+
+    const rows = pros.map(pro => {
       const u = pro.user;
+      const lastPayment = pro.payments && pro.payments.length
+        ? new Date(pro.payments[0].createdAt).toLocaleDateString('fr-FR') : '';
       return [
         (u.firstName || '') + ' ' + (u.lastName || ''),
         u.email,
+        u.city || '',
         pro.trade || '',
+        pro.subscription && pro.subscription.status === 'ACTIVE' ? 'Oui' : 'Non',
+        pro.payments ? pro.payments.length : 0,
         pro.totalTransactions,
         Math.round(pro.totalCommission),
         Math.round(pro.commissionDue),
         Math.round(pro.commissionPaid),
         pro.commissionDue > 0 ? 'Dû' : 'Réglé',
+        lastPayment,
       ];
     });
 
-    if (rows.length === 0) { showToast('Aucune donnée à exporter', true); return; }
+    const filterLabel = status === 'due' ? '_dues' : status === 'paid' ? '_reglees' : '';
+    const filename = 'commissions' + filterLabel + '_' + new Date().toISOString().slice(0, 10) + '.csv';
 
     const csv = [headers, ...rows].map(r =>
-      r.map(v => '"' + String(v || '').replace(/"/g, '""') + '"').join(',')
+      r.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(',')
     ).join('\n');
 
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'commissions_' + new Date().toISOString().slice(0,10) + '.csv'; a.click();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
-    showToast('Export téléchargé');
+    showToast('Export téléchargé — ' + rows.length + ' lignes');
   } catch (err) {
     showToast('Erreur export : ' + err.message, true);
   }

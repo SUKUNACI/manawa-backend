@@ -499,6 +499,14 @@ model BroadcastLog {
   createdAt    DateTime @default(now())
 }
 
+model AppConfig {
+  key         String   @id
+  value       String
+  description String?
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+}
+
 model Dispute {
   id             String    @id @default(uuid())
   paymentId      String

@@ -266,6 +266,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     <span class="ni">🎧</span> Support
     <span class="nav-badge orange" id="badge-support" style="display:none;">0</span>
   </div>
+  <div class="nav-item" onclick="showPage('settings',this)"><span class="ni">⚙️</span> Paramètres</div>
   <div class="nav-item" onclick="showPage('deleted',this)"><span class="ni">🗄️</span> Corbeille</div>
 
   <div class="sidebar-footer">
@@ -1383,6 +1384,122 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       </div>
     </div>
 
+    <!-- ══ PAGE: CONFIGURATION & PARAMÈTRES ══ -->
+    <div class="page" id="page-settings">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+        <!-- ── Finances ── -->
+        <div class="chart-card">
+          <h3>💹 Finances</h3>
+          <div style="margin-top:16px;">
+            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:6px;">Taux de commission (%)</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input type="number" id="cfg-commission-rate" class="filter-input" style="width:120px;" min="0" max="50" step="0.1" placeholder="8">
+              <span style="font-size:12px;color:var(--muted);">% sur chaque transaction</span>
+            </div>
+            <p id="cfg-commission-desc" style="font-size:11px;color:rgba(156,163,175,0.6);margin-top:6px;"></p>
+          </div>
+          <div class="modal-actions" style="margin-top:16px;">
+            <button class="btn btn-approve" onclick="saveConfig('finances')" style="flex:0;padding:10px 20px;">Enregistrer</button>
+          </div>
+        </div>
+
+        <!-- ── Abonnements ── -->
+        <div class="chart-card">
+          <h3>⭐ Prix des abonnements (FCFA/mois)</h3>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
+            <div>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Essentiel</label>
+              <input type="number" id="cfg-price-essentiel" class="filter-input" style="width:160px;" min="0" step="100" placeholder="2500">
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;color:var(--orange);margin-bottom:4px;">Pro</label>
+              <input type="number" id="cfg-price-pro" class="filter-input" style="width:160px;" min="0" step="100" placeholder="5000">
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;color:var(--gold);margin-bottom:4px;">Élite</label>
+              <input type="number" id="cfg-price-elite" class="filter-input" style="width:160px;" min="0" step="100" placeholder="10000">
+            </div>
+          </div>
+          <div class="modal-actions" style="margin-top:16px;">
+            <button class="btn btn-approve" onclick="saveConfig('abonnements')" style="flex:0;padding:10px 20px;">Enregistrer</button>
+          </div>
+        </div>
+
+        <!-- ── Limites métier ── -->
+        <div class="chart-card">
+          <h3>🔨 Limites métier</h3>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
+            <div>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Période d'essai (jours)</label>
+              <input type="number" id="cfg-trial-days" class="filter-input" style="width:120px;" min="0" max="90" step="1" placeholder="14">
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Devis max/mois — Essentiel</label>
+              <input type="number" id="cfg-max-quotes-essentiel" class="filter-input" style="width:120px;" min="1" step="1" placeholder="20">
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Métiers max — Gratuit/Essentiel</label>
+              <input type="number" id="cfg-max-trades-essentiel" class="filter-input" style="width:120px;" min="1" max="20" step="1" placeholder="3">
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Métiers max — Pro/Élite</label>
+              <input type="number" id="cfg-max-trades-premium" class="filter-input" style="width:120px;" min="1" max="20" step="1" placeholder="6">
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Rayon d'intervention par défaut (km)</label>
+              <input type="number" id="cfg-intervention-radius" class="filter-input" style="width:120px;" min="5" max="500" step="5" placeholder="30">
+            </div>
+          </div>
+          <div class="modal-actions" style="margin-top:16px;">
+            <button class="btn btn-approve" onclick="saveConfig('limites')" style="flex:0;padding:10px 20px;">Enregistrer</button>
+          </div>
+        </div>
+
+        <!-- ── Application ── -->
+        <div class="chart-card">
+          <h3>🌐 Application</h3>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
+            <div>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Nom de l'application</label>
+              <input type="text" id="cfg-app-name" class="filter-input" style="width:200px;" placeholder="MANAWA">
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Email de support</label>
+              <input type="email" id="cfg-support-email" class="filter-input" style="width:260px;" placeholder="support@manawa.app">
+            </div>
+            <div>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Mode maintenance</label>
+              <div style="display:flex;align-items:center;gap:12px;">
+                <select id="cfg-maintenance-mode" class="filter-select" style="width:auto;">
+                  <option value="false">🟢 Désactivé</option>
+                  <option value="true">🔴 Activé</option>
+                </select>
+                <span style="font-size:11px;color:var(--yellow);">⚠️ Bloque toutes les connexions non-admin</span>
+              </div>
+            </div>
+          </div>
+          <div class="modal-actions" style="margin-top:16px;">
+            <button class="btn btn-approve" onclick="saveConfig('application')" style="flex:0;padding:10px 20px;">Enregistrer</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Tableau historique des modifications -->
+      <div class="chart-card" style="margin-top:20px;">
+        <h3>🕒 Valeurs actuelles en base</h3>
+        <div class="table-wrap" style="margin-top:12px;">
+          <table>
+            <thead><tr><th>Clé</th><th>Valeur</th><th>Description</th><th>Modifié par</th><th>Dernière MAJ</th></tr></thead>
+            <tbody id="cfg-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
     <!-- ══ PAGE: COMPTES SUPPRIMÉS ══ -->
     <div class="page" id="page-deleted">
       <div class="filters">
@@ -1501,6 +1618,7 @@ const titles = {
   disputes: 'Litiges & Remboursements',
   communication: 'Communication',
   reviews: 'Avis & Notation',
+  settings: 'Configuration & Paramètres',
   support: 'Support',
   deleted: 'Comptes supprimés'
 };
@@ -1649,6 +1767,7 @@ function showPage(id, el) {
     case 'disputes': loadDisputeStats(); loadDisputes(1); break;
     case 'communication': loadCommunication(); break;
     case 'reviews': loadReviewStats(); loadReviews(1); break;
+    case 'settings': loadSettings(); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
   }
@@ -4511,6 +4630,100 @@ async function changeSupportStatus() {
     await apiCall('/admin/support/tickets/' + currentSupportTicketId + '/status', { method: 'PATCH', body: JSON.stringify({ status }) });
     showToast('Statut mis à jour');
     loadSupportTickets();
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// CONFIGURATION & PARAMÈTRES
+// ══════════════════════════════════════════════════════════════
+let settingsCache = {};
+
+async function loadSettings() {
+  try {
+    const cfg = await apiCall('/admin/config');
+    settingsCache = cfg;
+
+    // Finances
+    const cr = cfg['commission_rate'];
+    if (cr) {
+      document.getElementById('cfg-commission-rate').value = parseFloat(cr.value) * 100;
+      document.getElementById('cfg-commission-desc').textContent = cr.description || '';
+    }
+
+    // Abonnements
+    if (cfg['price_essentiel']) document.getElementById('cfg-price-essentiel').value = cfg['price_essentiel'].value;
+    if (cfg['price_pro']) document.getElementById('cfg-price-pro').value = cfg['price_pro'].value;
+    if (cfg['price_elite']) document.getElementById('cfg-price-elite').value = cfg['price_elite'].value;
+
+    // Limites
+    if (cfg['trial_days']) document.getElementById('cfg-trial-days').value = cfg['trial_days'].value;
+    if (cfg['max_quotes_essentiel']) document.getElementById('cfg-max-quotes-essentiel').value = cfg['max_quotes_essentiel'].value;
+    if (cfg['max_trades_essentiel']) document.getElementById('cfg-max-trades-essentiel').value = cfg['max_trades_essentiel'].value;
+    if (cfg['max_trades_premium']) document.getElementById('cfg-max-trades-premium').value = cfg['max_trades_premium'].value;
+    if (cfg['intervention_radius_km']) document.getElementById('cfg-intervention-radius').value = cfg['intervention_radius_km'].value;
+
+    // Application
+    if (cfg['app_name']) document.getElementById('cfg-app-name').value = cfg['app_name'].value;
+    if (cfg['support_email']) document.getElementById('cfg-support-email').value = cfg['support_email'].value;
+    if (cfg['app_maintenance_mode']) document.getElementById('cfg-maintenance-mode').value = cfg['app_maintenance_mode'].value;
+
+    // Tableau
+    const tbody = document.getElementById('cfg-table-body');
+    tbody.innerHTML = Object.entries(cfg).map(([key, v]) => {
+      const val = key === 'commission_rate' ? (parseFloat(v.value) * 100).toFixed(1) + '%' : escHtml(v.value);
+      const maint = key === 'app_maintenance_mode' && v.value === 'true';
+      return '<tr>' +
+        '<td><code style="color:var(--orange);font-size:12px;">' + escHtml(key) + '</code></td>' +
+        '<td><strong style="color:' + (maint ? 'var(--red)' : 'var(--white)') + ';">' + val + '</strong></td>' +
+        '<td style="color:var(--muted);font-size:12px;">' + escHtml(v.description || '') + '</td>' +
+        '<td style="font-size:11px;color:var(--muted);">' + (v.updatedBy ? v.updatedBy.substring(0, 8) + '…' : '—') + '</td>' +
+        '<td style="font-size:11px;color:var(--muted);">' + (v.updatedAt ? formatDate(v.updatedAt) : '—') + '</td>' +
+        '</tr>';
+    }).join('');
+  } catch (err) {
+    showToast('Erreur chargement config: ' + err.message, true);
+  }
+}
+
+async function saveConfig(section) {
+  const updates = {};
+
+  if (section === 'finances') {
+    const val = parseFloat(document.getElementById('cfg-commission-rate').value);
+    if (isNaN(val) || val < 0 || val > 50) { showToast('Taux invalide (0–50%)', true); return; }
+    updates['commission_rate'] = (val / 100).toFixed(4);
+  }
+
+  if (section === 'abonnements') {
+    updates['price_essentiel'] = parseInt(document.getElementById('cfg-price-essentiel').value) || 2500;
+    updates['price_pro'] = parseInt(document.getElementById('cfg-price-pro').value) || 5000;
+    updates['price_elite'] = parseInt(document.getElementById('cfg-price-elite').value) || 10000;
+  }
+
+  if (section === 'limites') {
+    updates['trial_days'] = parseInt(document.getElementById('cfg-trial-days').value) || 14;
+    updates['max_quotes_essentiel'] = parseInt(document.getElementById('cfg-max-quotes-essentiel').value) || 20;
+    updates['max_trades_essentiel'] = parseInt(document.getElementById('cfg-max-trades-essentiel').value) || 3;
+    updates['max_trades_premium'] = parseInt(document.getElementById('cfg-max-trades-premium').value) || 6;
+    updates['intervention_radius_km'] = parseInt(document.getElementById('cfg-intervention-radius').value) || 30;
+  }
+
+  if (section === 'application') {
+    const appName = document.getElementById('cfg-app-name').value.trim();
+    const supportEmail = document.getElementById('cfg-support-email').value.trim();
+    const maintenance = document.getElementById('cfg-maintenance-mode').value;
+    if (!appName) { showToast('Nom de l\'application requis', true); return; }
+    updates['app_name'] = appName;
+    updates['support_email'] = supportEmail;
+    updates['app_maintenance_mode'] = maintenance;
+  }
+
+  try {
+    await apiCall('/admin/config', { method: 'PATCH', body: JSON.stringify(updates) });
+    showToast('✅ Paramètres enregistrés');
+    loadSettings(); // Rafraîchit le tableau
   } catch (err) {
     showToast('Erreur: ' + err.message, true);
   }

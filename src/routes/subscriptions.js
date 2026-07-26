@@ -3,6 +3,8 @@ const axios = require('axios');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
+const { getConfig } = require('../utils/appConfig');
+
 const router = express.Router();
 
 const CINETPAY_API_URL = 'https://api-checkout.cinetpay.com/v2/payment';
@@ -127,16 +129,37 @@ function isOnTrial(pro) {
   return !!pro?.trialEndsAt && new Date(pro.trialEndsAt) > new Date();
 }
 
-function getTierConfig(tier) {
-  return TIERS[tier] || TIERS.GRATUIT;
+function getTierConfig(tier, prices) {
+  const base = TIERS[tier] || TIERS.GRATUIT;
+  if (!prices) return base;
+  // Override avec les prix dynamiques si fournis
+  const priceMap = { ESSENTIEL: prices.essentiel, PRO: prices.pro, ELITE: prices.elite };
+  if (priceMap[tier] !== undefined) return { ...base, price: priceMap[tier] };
+  return base;
+}
+
+async function getDynamicPrices() {
+  const [essentiel, pro, elite] = await Promise.all([
+    getConfig('price_essentiel'),
+    getConfig('price_pro'),
+    getConfig('price_elite'),
+  ]);
+  return {
+    essentiel: essentiel ?? 2500,
+    pro: pro ?? 5000,
+    elite: elite ?? 10000,
+  };
 }
 
 // GET /api/subscriptions/me
 router.get('/me', requireAuth, requireRole('PROFESSIONAL'), async (req, res, next) => {
   try {
-    const pro = await prisma.professional.findUnique({ where: { userId: req.user.id }, include: { subscription: true } });
+    const [pro, prices] = await Promise.all([
+      prisma.professional.findUnique({ where: { userId: req.user.id }, include: { subscription: true } }),
+      getDynamicPrices(),
+    ]);
     const tier = getActiveTier(pro.subscription, pro);
-    const tierConfig = getTierConfig(tier);
+    const tierConfig = getTierConfig(tier, prices);
     const onTrial = isOnTrial(pro);
     const trialDaysLeft = onTrial ? Math.max(0, Math.ceil((new Date(pro.trialEndsAt) - new Date()) / (1000 * 60 * 60 * 24))) : null;
 
@@ -154,7 +177,7 @@ router.get('/me', requireAuth, requireRole('PROFESSIONAL'), async (req, res, nex
       plans: Object.entries(TIERS).filter(([key]) => key !== 'GRATUIT').map(([key, t]) => ({
         key,
         label: t.label,
-        price: t.price,
+        price: getTierConfig(key, prices).price,
         color: t.color,
         icon: t.icon,
         benefits: t.benefits,
@@ -170,10 +193,11 @@ router.get('/me', requireAuth, requireRole('PROFESSIONAL'), async (req, res, nex
 router.post('/checkout', requireAuth, requireRole('PROFESSIONAL'), async (req, res, next) => {
   try {
     const { tier = 'ESSENTIEL' } = req.body;
-    const tierConfig = TIERS[tier];
-    if (!tierConfig || tier === 'GRATUIT') {
+    if (!TIERS[tier] || tier === 'GRATUIT') {
       return res.status(400).json({ error: 'Tier invalide' });
     }
+    const prices = await getDynamicPrices();
+    const tierConfig = getTierConfig(tier, prices);
 
     const pro = await prisma.professional.findUnique({ where: { userId: req.user.id } });
     const transactionId = `sub-${tier.toLowerCase()}-${pro.id}-${Date.now()}`;

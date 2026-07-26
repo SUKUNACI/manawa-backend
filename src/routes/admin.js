@@ -2557,6 +2557,181 @@ router.post('/communication/broadcast', async (req, res, next) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// GESTION DES ENTREPRISES
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/admin/companies/stats
+router.get('/companies/stats', async (req, res, next) => {
+  try {
+    const [totalCompanies, totalMembers, companiesWithMembers, totalIndependents] = await Promise.all([
+      prisma.professional.count({ where: { accountType: 'ENTREPRISE', user: { deletedAt: null } } }),
+      prisma.companyMember.count({ where: { status: 'ACTIVE' } }),
+      prisma.companyMember.groupBy({ by: ['companyId'], _count: { _all: true } }).then(r => r.length),
+      prisma.professional.count({ where: { accountType: 'INDEPENDENT', user: { deletedAt: null } } }),
+    ]);
+
+    // Taux de couverture : indépendants rattachés / total indépendants
+    const attachedIndependents = await prisma.companyMember.count({ where: { status: 'ACTIVE' } });
+    const coverageRate = totalIndependents > 0 ? Math.round((attachedIndependents / totalIndependents) * 100) : 0;
+
+    res.json({
+      totalCompanies,
+      totalMembers,
+      companiesWithMembers,
+      totalIndependents,
+      coverageRate,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/companies — liste paginée
+router.get('/companies', async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = 20;
+    const skip = (page - 1) * limit;
+    const { search } = req.query;
+
+    const where = { accountType: 'ENTREPRISE', user: { deletedAt: null } };
+    if (search) {
+      where.OR = [
+        { companyName: { contains: search, mode: 'insensitive' } },
+        { user: { firstName: { contains: search, mode: 'insensitive' } } },
+        { user: { lastName: { contains: search, mode: 'insensitive' } } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+        { companyCode: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [companies, total] = await Promise.all([
+      prisma.professional.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          companyName: true,
+          companyCode: true,
+          trade: true,
+          siret: true,
+          averageRating: true,
+          reviewCount: true,
+          completedMissionsCount: true,
+          createdAt: true,
+          user: { select: { id: true, firstName: true, lastName: true, email: true, city: true, avatarUrl: true, suspended: true } },
+          subscription: { select: { status: true, tier: true, expiresAt: true } },
+          companyMembers: {
+            where: { status: 'ACTIVE' },
+            select: {
+              id: true,
+              joinedAt: true,
+              member: {
+                select: {
+                  id: true, trade: true, averageRating: true, reviewCount: true,
+                  user: { select: { firstName: true, lastName: true, city: true, avatarUrl: true } },
+                },
+              },
+            },
+          },
+        },
+      }),
+      prisma.professional.count({ where }),
+    ]);
+
+    // Calculer qualityRate pour chaque entreprise
+    const result = companies.map(c => {
+      const members = c.companyMembers || [];
+      const qualified = members.filter(m => {
+        const s = m.member;
+        // Score simplifié : pros avec rating >= 4 ou missions complétées > 0 → qualifiés
+        return (s.averageRating >= 4 && s.reviewCount > 0) || s.completedMissionsCount > 0;
+      }).length;
+      const qualityRate = members.length > 0 ? Math.round((qualified / members.length) * 100) : null;
+      return { ...c, memberCount: members.length, qualityRate };
+    });
+
+    res.json({ companies: result, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/companies/:id — détail complet
+router.get('/companies/:id', async (req, res, next) => {
+  try {
+    const company = await prisma.professional.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        companyName: true,
+        companyCode: true,
+        trade: true,
+        trades: true,
+        siret: true,
+        description: true,
+        employeeCount: true,
+        averageRating: true,
+        reviewCount: true,
+        completedMissionsCount: true,
+        cancelledMissionsCount: true,
+        complaintsCount: true,
+        accountType: true,
+        identityStatus: true,
+        decennaleVerified: true,
+        rgeLabel: true,
+        createdAt: true,
+        user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, city: true, avatarUrl: true, suspended: true, createdAt: true } },
+        subscription: { select: { status: true, tier: true, expiresAt: true, startedAt: true } },
+        companyMembers: {
+          where: { status: 'ACTIVE' },
+          orderBy: { joinedAt: 'desc' },
+          include: {
+            member: {
+              select: {
+                id: true,
+                trade: true,
+                trades: true,
+                averageRating: true,
+                reviewCount: true,
+                completedMissionsCount: true,
+                cancelledMissionsCount: true,
+                identityStatus: true,
+                user: { select: { id: true, firstName: true, lastName: true, email: true, city: true, avatarUrl: true, suspended: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!company) return res.status(404).json({ error: 'Entreprise non trouvée' });
+    if (company.accountType !== 'ENTREPRISE') return res.status(400).json({ error: 'Ce professionnel n\'est pas une entreprise' });
+
+    res.json(company);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/admin/companies/:id/members/:memberId — retirer un membre
+router.delete('/companies/:id/members/:memberId', async (req, res, next) => {
+  try {
+    const membership = await prisma.companyMember.findFirst({
+      where: { companyId: req.params.id, memberId: req.params.memberId },
+    });
+    if (!membership) return res.status(404).json({ error: 'Membre non trouvé dans cette entreprise' });
+
+    await prisma.companyMember.delete({ where: { id: membership.id } });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
 // CONFIGURATION & PARAMÈTRES
 // ══════════════════════════════════════════════════════════════
 

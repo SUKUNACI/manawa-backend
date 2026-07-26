@@ -261,6 +261,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     <span class="ni">⭐</span> Avis & Notation
     <span class="nav-badge red" id="badge-reviews" style="display:none;">0</span>
   </div>
+  <div class="nav-item" onclick="showPage('companies',this)"><span class="ni">🏢</span> Entreprises</div>
   <div class="nav-item" onclick="showPage('communication',this)"><span class="ni">📡</span> Communication</div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
@@ -1507,6 +1508,34 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     </div>
 
     <!-- ══ PAGE: COMPTES SUPPRIMÉS ══ -->
+    <!-- ══ PAGE: ENTREPRISES ══ -->
+    <div class="page" id="page-companies">
+      <div class="kpi-grid" id="companies-kpis">
+        <div class="kpi orange"><div class="kpi-icon">🏢</div><div class="kpi-val" id="cmp-total">--</div><div class="kpi-label">Entreprises actives</div></div>
+        <div class="kpi blue"><div class="kpi-icon">👷</div><div class="kpi-val" id="cmp-members">--</div><div class="kpi-label">Membres rattachés</div></div>
+        <div class="kpi green"><div class="kpi-icon">📊</div><div class="kpi-val" id="cmp-coverage">--</div><div class="kpi-label">Taux couverture</div></div>
+        <div class="kpi red"><div class="kpi-icon">🏗️</div><div class="kpi-val" id="cmp-independents">--</div><div class="kpi-label">Indépendants total</div></div>
+      </div>
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Rechercher une entreprise…" id="cmp-search" oninput="debounceCompanies()">
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Entreprise</th><th>Code</th><th>Métier</th><th>Ville</th><th>Membres</th><th>Qualité</th><th>Note</th><th>Plan</th><th>Actions</th></tr></thead>
+          <tbody id="cmp-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="cmp-empty" style="display:none;">
+        <div class="es-icon">🏢</div>
+        <p>Aucune entreprise trouvée</p>
+      </div>
+      <div class="pagination" id="cmp-pagination" style="display:none;">
+        <button class="btn btn-view" id="cmp-prev" onclick="loadCompanies(cmpCurrentPage-1)">← Précédent</button>
+        <span class="page-info" id="cmp-page-info"></span>
+        <button class="btn btn-view" id="cmp-next" onclick="loadCompanies(cmpCurrentPage+1)">Suivant →</button>
+      </div>
+    </div>
+
     <div class="page" id="page-deleted">
       <div class="filters">
         <input class="filter-input" placeholder="🔍 Rechercher par ID, nom, email..." id="deleted-search" oninput="loadDeletedUsers(1)">
@@ -1604,6 +1633,33 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   </div>
 </div>
 
+<!-- ══ MODAL: DÉTAIL ENTREPRISE ══ -->
+<div class="modal-overlay" id="modal-company">
+  <div class="modal" style="width:720px;max-height:88vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+      <div>
+        <h2 id="cmp-modal-name" style="margin-bottom:4px;"></h2>
+        <p id="cmp-modal-meta" style="margin:0;font-size:13px;color:var(--muted);"></p>
+      </div>
+      <button class="btn btn-view" onclick="closeModal('modal-company')" style="flex-shrink:0;">✕ Fermer</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;" id="cmp-modal-kpis"></div>
+    <div class="section-header" style="margin-bottom:12px;">
+      <h2 style="font-size:15px;">👷 Membres de l'équipe (<span id="cmp-modal-member-count">0</span>)</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Membre</th><th>Métier</th><th>Ville</th><th>Note</th><th>Missions</th><th>ID vérifié</th><th>Rejointe le</th><th>Actions</th></tr></thead>
+        <tbody id="cmp-modal-members"></tbody>
+      </table>
+    </div>
+    <div class="empty-state" id="cmp-modal-empty" style="display:none;">
+      <div class="es-icon">👷</div>
+      <p>Aucun membre dans cette entreprise</p>
+    </div>
+  </div>
+</div>
+
 <!-- ══ TOAST ══ -->
 <div class="toast" id="toast"><span style="font-size:20px;" id="toast-icon">✅</span><p id="toast-msg">Action réalisée</p></div>
 
@@ -1639,6 +1695,7 @@ const titles = {
   disputes: 'Litiges & Remboursements',
   communication: 'Communication',
   reviews: 'Avis & Notation',
+  companies: 'Gestion des entreprises',
   settings: 'Configuration & Paramètres',
   support: 'Support',
   deleted: 'Comptes supprimés'
@@ -1788,6 +1845,7 @@ function showPage(id, el) {
     case 'disputes': loadDisputeStats(); loadDisputes(1); break;
     case 'communication': loadCommunication(); break;
     case 'reviews': loadReviewStats(); loadReviews(1); break;
+    case 'companies': loadCompanyStats(); loadCompanies(1); break;
     case 'settings': loadSettings(); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
@@ -5030,6 +5088,180 @@ async function reviewModalDelete() {
     loadReviewStats();
   }
 })();
+
+// ══════════════════════════════════════════════════════════════
+// GESTION DES ENTREPRISES
+// ══════════════════════════════════════════════════════════════
+let cmpCurrentPage = 1;
+let cmpSearchTimer = null;
+
+async function loadCompanyStats() {
+  try {
+    const s = await apiCall('/admin/companies/stats');
+    document.getElementById('cmp-total').textContent = s.totalCompanies ?? '--';
+    document.getElementById('cmp-members').textContent = s.totalMembers ?? '--';
+    document.getElementById('cmp-coverage').textContent = (s.coverageRate != null) ? s.coverageRate + '%' : '--';
+    document.getElementById('cmp-independents').textContent = s.totalIndependents ?? '--';
+  } catch(e) {}
+}
+
+async function loadCompanies(page) {
+  page = Math.max(1, page || 1);
+  const search = document.getElementById('cmp-search').value.trim();
+  const tbody = document.getElementById('cmp-tbody');
+  const empty = document.getElementById('cmp-empty');
+  const pag = document.getElementById('cmp-pagination');
+  tbody.innerHTML = '<tr><td colspan="9"><div class="loading-spinner"></div></td></tr>';
+
+  try {
+    let url = '/admin/companies?page=' + page;
+    if (search) url += '&search=' + encodeURIComponent(search);
+    const data = await apiCall(url);
+    cmpCurrentPage = data.page;
+    tbody.innerHTML = '';
+
+    if (!data.companies || data.companies.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = '';
+      pag.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+
+    data.companies.forEach(c => {
+      const name = c.companyName || (c.user.firstName + ' ' + c.user.lastName);
+      const quality = c.qualityRate != null ? c.qualityRate + '%' : '—';
+      const qualityColor = c.qualityRate >= 80 ? 'var(--green)' : c.qualityRate >= 50 ? 'var(--yellow)' : 'var(--red)';
+      const plan = c.subscription?.status === 'ACTIVE' ? '<span class="badge badge-yellow">⭐ ' + (c.subscription.tier || 'Premium') + '</span>' : '<span class="badge badge-muted">Gratuit</span>';
+      const rating = c.averageRating > 0 ? '⭐ ' + c.averageRating.toFixed(1) : '—';
+      const suspended = c.user.suspended ? '<span class="badge badge-red">Suspendu</span> ' : '';
+
+      tbody.innerHTML += `<tr>
+        <td>
+          ${suspended}
+          <strong>${escHtml(name)}</strong><br>
+          <span style="font-size:11px;color:var(--muted);">${escHtml(c.user.email)}</span>
+        </td>
+        <td><code style="font-size:11px;color:var(--orange);">${escHtml(c.companyCode || '—')}</code></td>
+        <td>${escHtml(c.trade || '—')}</td>
+        <td>${escHtml(c.user.city || '—')}</td>
+        <td style="font-weight:700;color:var(--white);">${c.memberCount}</td>
+        <td style="font-weight:700;color:${qualityColor};">${quality}</td>
+        <td>${rating}</td>
+        <td>${plan}</td>
+        <td class="td-actions">
+          <button class="btn btn-view" onclick="openCompanyModal('${c.id}')">🔍 Détail</button>
+        </td>
+      </tr>`;
+    });
+
+    pag.style.display = data.pages > 1 ? 'flex' : 'none';
+    document.getElementById('cmp-page-info').textContent = 'Page ' + data.page + ' / ' + data.pages + ' — ' + data.total + ' entreprise(s)';
+    document.getElementById('cmp-prev').disabled = data.page <= 1;
+    document.getElementById('cmp-next').disabled = data.page >= data.pages;
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--red);">Erreur de chargement</td></tr>';
+  }
+}
+
+function debounceCompanies() {
+  clearTimeout(cmpSearchTimer);
+  cmpSearchTimer = setTimeout(() => loadCompanies(1), 350);
+}
+
+let _currentCompanyId = null;
+
+async function openCompanyModal(companyId) {
+  _currentCompanyId = companyId;
+  const overlay = document.getElementById('modal-company');
+  overlay.classList.add('show');
+  document.getElementById('cmp-modal-name').textContent = 'Chargement…';
+  document.getElementById('cmp-modal-meta').textContent = '';
+  document.getElementById('cmp-modal-kpis').innerHTML = '<div class="loading-spinner"></div>';
+  document.getElementById('cmp-modal-members').innerHTML = '';
+  document.getElementById('cmp-modal-empty').style.display = 'none';
+
+  try {
+    const c = await apiCall('/admin/companies/' + companyId);
+    const name = c.companyName || (c.user.firstName + ' ' + c.user.lastName);
+    document.getElementById('cmp-modal-name').textContent = '🏢 ' + name;
+    document.getElementById('cmp-modal-meta').textContent =
+      (c.companyCode || '') + ' • ' + (c.user.email || '') + ' • ' + (c.user.city || '—') + ' • Inscrit le ' + new Date(c.createdAt).toLocaleDateString('fr-FR');
+
+    const subLabel = c.subscription?.status === 'ACTIVE'
+      ? '⭐ ' + (c.subscription.tier || 'Premium') + ' (exp. ' + new Date(c.subscription.expiresAt).toLocaleDateString('fr-FR') + ')'
+      : 'Gratuit';
+
+    document.getElementById('cmp-modal-kpis').innerHTML = `
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">MÉTIER</div>
+        <div style="font-size:15px;font-weight:700;color:var(--white);">${escHtml(c.trade || '—')}</div>
+      </div>
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">NOTE MOYENNE</div>
+        <div style="font-size:15px;font-weight:700;color:var(--white);">${c.averageRating > 0 ? '⭐ ' + c.averageRating.toFixed(1) + ' (' + c.reviewCount + ' avis)' : '—'}</div>
+      </div>
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">MISSIONS</div>
+        <div style="font-size:15px;font-weight:700;color:var(--white);">${c.completedMissionsCount} terminées · ${c.cancelledMissionsCount} annulées</div>
+      </div>
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">ABONNEMENT</div>
+        <div style="font-size:15px;font-weight:700;color:var(--gold);">${subLabel}</div>
+      </div>
+    `;
+
+    const members = c.companyMembers || [];
+    document.getElementById('cmp-modal-member-count').textContent = members.length;
+
+    if (members.length === 0) {
+      document.getElementById('cmp-modal-empty').style.display = '';
+    } else {
+      const tbody = document.getElementById('cmp-modal-members');
+      tbody.innerHTML = '';
+      members.forEach(m => {
+        const p = m.member;
+        const mName = p.user.firstName + ' ' + p.user.lastName;
+        const idBadge = p.identityStatus === 'APPROVED'
+          ? '<span class="badge badge-green">✓ Vérifié</span>'
+          : p.identityStatus === 'PENDING'
+          ? '<span class="badge badge-yellow">⏳ En attente</span>'
+          : '<span class="badge badge-muted">Non soumis</span>';
+        const rating = p.averageRating > 0 ? '⭐ ' + p.averageRating.toFixed(1) : '—';
+        tbody.innerHTML += `<tr>
+          <td>
+            <strong>${escHtml(mName)}</strong><br>
+            <span style="font-size:11px;color:var(--muted);">${escHtml(p.user.email || '')}</span>
+          </td>
+          <td>${escHtml(p.trade || '—')}</td>
+          <td>${escHtml(p.user.city || '—')}</td>
+          <td>${rating}</td>
+          <td>${p.completedMissionsCount}</td>
+          <td>${idBadge}</td>
+          <td style="font-size:11px;color:var(--muted);">${new Date(m.joinedAt).toLocaleDateString('fr-FR')}</td>
+          <td class="td-actions">
+            <button class="btn btn-reject" onclick="removeMember('${c.id}','${p.id}','${escHtml(mName)}')">Retirer</button>
+          </td>
+        </tr>`;
+      });
+    }
+  } catch(e) {
+    document.getElementById('cmp-modal-name').textContent = 'Erreur de chargement';
+  }
+}
+
+async function removeMember(companyId, memberId, memberName) {
+  if (!confirm('Retirer ' + memberName + ' de cette entreprise ?')) return;
+  try {
+    await apiCall('/admin/companies/' + companyId + '/members/' + memberId, { method: 'DELETE' });
+    showToast('Membre retiré de l\'entreprise');
+    openCompanyModal(companyId); // recharger le détail
+    loadCompanies(cmpCurrentPage);
+    loadCompanyStats();
+  } catch(e) {
+    showToast('Erreur : ' + e.message, true);
+  }
+}
 </script>
 </body>
 </html>

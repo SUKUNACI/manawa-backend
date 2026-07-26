@@ -2546,4 +2546,154 @@ router.post('/communication/broadcast', async (req, res, next) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// GESTION DES AVIS
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/admin/reviews/stats
+router.get('/reviews/stats', async (req, res, next) => {
+  try {
+    const [total, flagged, ratingGroups, avgAgg] = await Promise.all([
+      prisma.review.count(),
+      prisma.reviewFlag.groupBy({ by: ['reviewId'], _count: true }).then(r => r.length),
+      prisma.review.groupBy({ by: ['rating'], _count: { _all: true }, orderBy: { rating: 'asc' } }),
+      prisma.review.aggregate({ _avg: { rating: true } }),
+    ]);
+
+    // Taux de satisfaction : % d'avis >= 4 étoiles
+    const positiveCount = ratingGroups.filter(g => g.rating >= 4).reduce((s, g) => s + g._count._all, 0);
+    const satisfactionRate = total > 0 ? Math.round((positiveCount / total) * 100) : 0;
+
+    // Distribution par note (1 à 5)
+    const distribution = [1, 2, 3, 4, 5].map(r => {
+      const found = ratingGroups.find(g => g.rating === r);
+      return { rating: r, count: found ? found._count._all : 0 };
+    });
+
+    res.json({
+      total,
+      flagged,
+      averageRating: avgAgg._avg.rating ? Math.round(avgAgg._avg.rating * 10) / 10 : 0,
+      satisfactionRate,
+      distribution,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/reviews — liste paginée avec filtres
+router.get('/reviews', async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const skip = (page - 1) * limit;
+    const { rating, flagged, search } = req.query;
+
+    // Construire le where
+    const where = {};
+    if (rating) where.rating = parseInt(rating);
+    if (search) {
+      where.OR = [
+        { author: { firstName: { contains: search, mode: 'insensitive' } } },
+        { author: { lastName: { contains: search, mode: 'insensitive' } } },
+        { professional: { user: { firstName: { contains: search, mode: 'insensitive' } } } },
+        { professional: { user: { lastName: { contains: search, mode: 'insensitive' } } } },
+        { comment: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    if (flagged === 'true') {
+      where.flags = { some: {} };
+    }
+
+    const [reviews, total] = await Promise.all([
+      prisma.review.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          author: { select: { id: true, firstName: true, lastName: true, email: true, avatarUrl: true } },
+          professional: {
+            select: {
+              id: true,
+              averageRating: true,
+              reviewCount: true,
+              user: { select: { id: true, firstName: true, lastName: true, email: true } },
+            },
+          },
+          project: { select: { id: true, title: true } },
+          flags: { select: { id: true, flaggedBy: true, reason: true, createdAt: true } },
+        },
+      }),
+      prisma.review.count({ where }),
+    ]);
+
+    res.json({ reviews, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/admin/reviews/:id — supprimer un avis + recalculer
+router.delete('/reviews/:id', async (req, res, next) => {
+  try {
+    const review = await prisma.review.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, professionalId: true },
+    });
+    if (!review) return res.status(404).json({ error: 'Avis non trouvé' });
+
+    // Supprimer (flags cascadent grâce à onDelete: Cascade sur ReviewFlag)
+    await prisma.review.delete({ where: { id: req.params.id } });
+
+    // Recalculer averageRating et reviewCount
+    const agg = await prisma.review.aggregate({
+      where: { professionalId: review.professionalId },
+      _avg: { rating: true },
+      _count: { _all: true },
+    });
+
+    await prisma.professional.update({
+      where: { id: review.professionalId },
+      data: {
+        averageRating: agg._avg.rating ? Math.round(agg._avg.rating * 10) / 10 : 0,
+        reviewCount: agg._count._all,
+      },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/reviews/:id/flag — signaler ou retirer le flag
+router.patch('/reviews/:id/flag', async (req, res, next) => {
+  try {
+    const { action, reason } = req.body; // action: 'add' | 'remove'
+    const review = await prisma.review.findUnique({ where: { id: req.params.id } });
+    if (!review) return res.status(404).json({ error: 'Avis non trouvé' });
+
+    if (action === 'add') {
+      const existing = await prisma.reviewFlag.findFirst({
+        where: { reviewId: req.params.id, flaggedBy: req.user.id },
+      });
+      if (!existing) {
+        await prisma.reviewFlag.create({
+          data: { reviewId: req.params.id, flaggedBy: req.user.id, reason: reason || 'admin_manual' },
+        });
+      }
+    } else if (action === 'remove') {
+      await prisma.reviewFlag.deleteMany({ where: { reviewId: req.params.id } });
+    } else {
+      return res.status(400).json({ error: 'action doit être "add" ou "remove"' });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

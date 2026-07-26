@@ -257,6 +257,10 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     <span class="ni">⚖️</span> Litiges
     <span class="nav-badge red" id="badge-disputes" style="display:none;">0</span>
   </div>
+  <div class="nav-item" onclick="showPage('reviews',this)">
+    <span class="ni">⭐</span> Avis & Notation
+    <span class="nav-badge red" id="badge-reviews" style="display:none;">0</span>
+  </div>
   <div class="nav-item" onclick="showPage('communication',this)"><span class="ni">📡</span> Communication</div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
@@ -1303,6 +1307,82 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       </div>
     </div>
 
+    <!-- ══ PAGE: AVIS & NOTATION ══ -->
+    <div class="page" id="page-reviews">
+
+      <!-- KPIs -->
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px;">
+        <div class="kpi orange">
+          <div class="kpi-icon">⭐</div>
+          <div class="kpi-val" id="rev-total">--</div>
+          <div class="kpi-label">Avis publiés</div>
+        </div>
+        <div class="kpi green">
+          <div class="kpi-icon">📊</div>
+          <div class="kpi-val" id="rev-avg">--</div>
+          <div class="kpi-label">Note moyenne globale</div>
+        </div>
+        <div class="kpi blue">
+          <div class="kpi-icon">😊</div>
+          <div class="kpi-val" id="rev-satisfaction">--%</div>
+          <div class="kpi-label">Taux satisfaction (≥4★)</div>
+        </div>
+        <div class="kpi red">
+          <div class="kpi-icon">🚩</div>
+          <div class="kpi-val" id="rev-flagged">--</div>
+          <div class="kpi-label">Avis signalés</div>
+        </div>
+      </div>
+
+      <!-- Distribution -->
+      <div class="chart-card" style="margin-bottom:24px;">
+        <h3>Distribution par note</h3>
+        <div id="rev-distribution" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filters" style="margin-bottom:16px;">
+        <input class="filter-input" placeholder="🔍 Auteur, pro, commentaire..." id="rev-search" oninput="debounceRevSearch()">
+        <select class="filter-select" id="rev-rating-filter" onchange="loadReviews(1)">
+          <option value="">Toutes les notes</option>
+          <option value="5">⭐⭐⭐⭐⭐ 5 étoiles</option>
+          <option value="4">⭐⭐⭐⭐ 4 étoiles</option>
+          <option value="3">⭐⭐⭐ 3 étoiles</option>
+          <option value="2">⭐⭐ 2 étoiles</option>
+          <option value="1">⭐ 1 étoile</option>
+        </select>
+        <select class="filter-select" id="rev-flagged-filter" onchange="loadReviews(1)">
+          <option value="">Tous les avis</option>
+          <option value="true">🚩 Signalés uniquement</option>
+        </select>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Note</th><th>Auteur</th><th>Professionnel évalué</th><th>Commentaire</th><th>Projet</th><th>Flags</th><th>Date</th><th>Actions</th></tr></thead>
+          <tbody id="rev-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="rev-empty" style="display:none;">
+        <div class="es-icon">⭐</div>
+        <p>Aucun avis trouvé</p>
+      </div>
+      <div id="rev-pagination"></div>
+    </div>
+
+    <!-- ══ MODAL: DÉTAIL AVIS ══ -->
+    <div class="modal-overlay" id="modal-review">
+      <div class="modal" style="width:560px;">
+        <h2 id="rev-modal-title">Avis</h2>
+        <div id="rev-modal-body" style="margin-bottom:16px;"></div>
+        <div class="modal-actions">
+          <button class="btn btn-view" onclick="closeModal('modal-review')">Fermer</button>
+          <button class="btn" style="background:var(--yellow-dim);color:var(--yellow);border:1px solid rgba(245,158,11,0.3);" id="rev-modal-flag-btn" onclick="reviewModalFlag()">🚩 Signaler</button>
+          <button class="btn btn-reject" id="rev-modal-delete-btn" onclick="reviewModalDelete()">🗑 Supprimer</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ══ PAGE: COMPTES SUPPRIMÉS ══ -->
     <div class="page" id="page-deleted">
       <div class="filters">
@@ -1420,6 +1500,7 @@ const titles = {
   subscriptions: 'Gestion des abonnements',
   disputes: 'Litiges & Remboursements',
   communication: 'Communication',
+  reviews: 'Avis & Notation',
   support: 'Support',
   deleted: 'Comptes supprimés'
 };
@@ -1488,6 +1569,7 @@ async function doLogin() {
     loadModerationStats();
     loadDisputeStats();
     loadSecurityStats();
+    loadReviewStats();
   } catch (err) {
     errEl.textContent = err.message;
     errEl.style.display = 'block';
@@ -1566,6 +1648,7 @@ function showPage(id, el) {
     case 'subscriptions': loadSubStats(); loadSubscriptions(1); break;
     case 'disputes': loadDisputeStats(); loadDisputes(1); break;
     case 'communication': loadCommunication(); break;
+    case 'reviews': loadReviewStats(); loadReviews(1); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
   }
@@ -4434,6 +4517,208 @@ async function changeSupportStatus() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// AVIS & NOTATION
+// ══════════════════════════════════════════════════════════════
+let revCurrentPage = 1;
+let revDebounceTimer = null;
+let currentReviewId = null;
+let currentReviewFlagged = false;
+
+async function loadReviewStats() {
+  try {
+    const data = await apiCall('/admin/reviews/stats');
+    document.getElementById('rev-total').textContent = data.total;
+    document.getElementById('rev-avg').textContent = data.averageRating + ' / 5';
+    document.getElementById('rev-satisfaction').textContent = data.satisfactionRate + '%';
+    document.getElementById('rev-flagged').textContent = data.flagged;
+
+    // Badge dans la nav
+    const badge = document.getElementById('badge-reviews');
+    if (data.flagged > 0) {
+      badge.textContent = data.flagged;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+
+    // Distribution
+    const distEl = document.getElementById('rev-distribution');
+    const max = Math.max(...data.distribution.map(d => d.count), 1);
+    distEl.innerHTML = data.distribution.slice().reverse().map(d => {
+      const pct = Math.round((d.count / max) * 100);
+      const stars = '⭐'.repeat(d.rating);
+      return '<div style="display:flex;align-items:center;gap:12px;">' +
+        '<span style="font-size:12px;width:80px;color:var(--muted);">' + stars + '</span>' +
+        '<div style="flex:1;background:var(--dark4);border-radius:6px;height:10px;overflow:hidden;">' +
+        '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,var(--orange),var(--gold));border-radius:6px;transition:width .5s;"></div>' +
+        '</div>' +
+        '<span style="font-size:12px;color:var(--white);font-weight:600;min-width:30px;text-align:right;">' + d.count + '</span>' +
+        '</div>';
+    }).join('');
+  } catch (err) {
+    showToast('Erreur chargement stats avis', true);
+  }
+}
+
+async function loadReviews(page) {
+  revCurrentPage = page || 1;
+  const search = document.getElementById('rev-search').value.trim();
+  const rating = document.getElementById('rev-rating-filter').value;
+  const flagged = document.getElementById('rev-flagged-filter').value;
+
+  let url = '/admin/reviews?page=' + revCurrentPage;
+  if (search) url += '&search=' + encodeURIComponent(search);
+  if (rating) url += '&rating=' + rating;
+  if (flagged) url += '&flagged=' + flagged;
+
+  const tbody = document.getElementById('rev-tbody');
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">Chargement...</td></tr>';
+
+  try {
+    const data = await apiCall(url);
+    if (!data.reviews.length) {
+      tbody.innerHTML = '';
+      document.getElementById('rev-empty').style.display = '';
+      document.getElementById('rev-pagination').innerHTML = '';
+      return;
+    }
+    document.getElementById('rev-empty').style.display = 'none';
+
+    tbody.innerHTML = data.reviews.map(r => {
+      const stars = '⭐'.repeat(r.rating) + (r.rating < 5 ? '<span style="color:var(--dark4);">' + '⭐'.repeat(5 - r.rating) + '</span>' : '');
+      const author = escHtml((r.author.firstName || '') + ' ' + (r.author.lastName || ''));
+      const pro = r.professional ? escHtml((r.professional.user.firstName || '') + ' ' + (r.professional.user.lastName || '')) : '—';
+      const comment = r.comment ? (r.comment.length > 60 ? escHtml(r.comment.substring(0, 60)) + '…' : escHtml(r.comment)) : '<span style="color:var(--muted);">Sans commentaire</span>';
+      const project = r.project ? escHtml(r.project.title.substring(0, 30)) : '—';
+      const flagCount = r.flags.length;
+      const flagBadge = flagCount > 0 ? '<span style="background:var(--red-dim);color:var(--red);padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700;">🚩 ' + flagCount + '</span>' : '—';
+      const isFlagged = flagCount > 0;
+
+      return '<tr>' +
+        '<td>' + stars + '</td>' +
+        '<td><span style="color:var(--white);">' + author + '</span><br><span style="font-size:11px;color:var(--muted);">' + escHtml(r.author.email) + '</span></td>' +
+        '<td><span style="color:var(--orange);">' + pro + '</span><br><span style="font-size:11px;color:var(--muted);">' + (r.professional ? r.professional.averageRating + '★ (' + r.professional.reviewCount + ' avis)' : '') + '</span></td>' +
+        '<td style="max-width:200px;">' + comment + '</td>' +
+        '<td>' + project + '</td>' +
+        '<td>' + flagBadge + '</td>' +
+        '<td>' + formatDate(r.createdAt) + '</td>' +
+        '<td><button class="btn btn-view" style="padding:6px 12px;font-size:12px;" onclick="openReviewModal(\'' + r.id + '\',' + isFlagged + ')">Voir</button></td>' +
+        '</tr>';
+    }).join('');
+
+    // Pagination
+    const pgEl = document.getElementById('rev-pagination');
+    if (data.pages > 1) {
+      pgEl.innerHTML = '<div class="pagination">' +
+        '<button class="btn btn-view" onclick="loadReviews(' + (revCurrentPage - 1) + ')" ' + (revCurrentPage <= 1 ? 'disabled' : '') + '>← Préc</button>' +
+        '<span class="page-info">Page ' + revCurrentPage + ' / ' + data.pages + ' (' + data.total + ' avis)</span>' +
+        '<button class="btn btn-view" onclick="loadReviews(' + (revCurrentPage + 1) + ')" ' + (revCurrentPage >= data.pages ? 'disabled' : '') + '>Suiv →</button>' +
+        '</div>';
+    } else {
+      pgEl.innerHTML = '<div class="pagination"><span class="page-info">' + data.total + ' avis</span></div>';
+    }
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--red);text-align:center;padding:24px;">Erreur: ' + escHtml(err.message) + '</td></tr>';
+  }
+}
+
+function debounceRevSearch() {
+  clearTimeout(revDebounceTimer);
+  revDebounceTimer = setTimeout(() => loadReviews(1), 350);
+}
+
+async function openReviewModal(reviewId, isFlagged) {
+  currentReviewId = reviewId;
+  currentReviewFlagged = isFlagged;
+  try {
+    // Chercher dans les données déjà chargées pour afficher le détail complet
+    const data = await apiCall('/admin/reviews?page=1&search=');
+    // On re-fetch avec l'ID spécifique via la liste
+    const url = '/admin/reviews?page=1';
+    // Fetch all pages until found — use a direct approach: reload with no filter then find
+    // Simpler: reload the current list and find
+    const allData = await apiCall('/admin/reviews?page=' + revCurrentPage +
+      (document.getElementById('rev-search').value ? '&search=' + encodeURIComponent(document.getElementById('rev-search').value) : '') +
+      (document.getElementById('rev-rating-filter').value ? '&rating=' + document.getElementById('rev-rating-filter').value : '') +
+      (document.getElementById('rev-flagged-filter').value ? '&flagged=' + document.getElementById('rev-flagged-filter').value : ''));
+    const r = allData.reviews.find(x => x.id === reviewId);
+    if (!r) { showToast('Avis introuvable', true); return; }
+
+    document.getElementById('rev-modal-title').textContent = '⭐'.repeat(r.rating) + ' Avis de ' + (r.author.firstName || '') + ' ' + (r.author.lastName || '');
+
+    const flagHtml = r.flags.length > 0
+      ? '<div style="background:var(--red-dim);border:1px solid rgba(239,68,68,0.25);border-radius:10px;padding:10px;margin-top:12px;">' +
+        '<p style="color:var(--red);font-size:12px;font-weight:600;">🚩 ' + r.flags.length + ' signalement(s)</p>' +
+        r.flags.map(f => '<p style="font-size:11px;color:var(--muted);margin-top:4px;">• ' + escHtml(f.reason || 'sans motif') + ' — par ' + escHtml(f.flaggedBy) + ' le ' + formatDate(f.createdAt) + '</p>').join('') +
+        '</div>'
+      : '';
+
+    document.getElementById('rev-modal-body').innerHTML =
+      '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:12px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">' +
+          '<div>' +
+            '<p style="font-weight:600;color:var(--white);">👤 ' + escHtml((r.author.firstName || '') + ' ' + (r.author.lastName || '')) + '</p>' +
+            '<p style="font-size:11px;color:var(--muted);">' + escHtml(r.author.email) + '</p>' +
+          '</div>' +
+          '<span style="font-size:20px;">' + '⭐'.repeat(r.rating) + '</span>' +
+        '</div>' +
+        (r.comment ? '<p style="font-size:14px;color:var(--light);line-height:1.6;font-style:italic;">«' + escHtml(r.comment) + '»</p>' : '<p style="color:var(--muted);font-size:13px;">Sans commentaire</p>') +
+        '<p style="font-size:11px;color:var(--muted);margin-top:8px;">' + formatDate(r.createdAt) + '</p>' +
+      '</div>' +
+      '<p style="font-size:13px;color:var(--muted);margin-bottom:4px;">Professionnel évalué :</p>' +
+      '<p style="font-size:14px;color:var(--orange);">' + (r.professional ? escHtml((r.professional.user.firstName || '') + ' ' + (r.professional.user.lastName || '')) + ' — ' + r.professional.averageRating + '★ (' + r.professional.reviewCount + ' avis)' : '—') + '</p>' +
+      (r.project ? '<p style="font-size:13px;color:var(--muted);margin-top:8px;">Projet : <span style="color:var(--white);">' + escHtml(r.project.title) + '</span></p>' : '') +
+      flagHtml;
+
+    // Bouton flag
+    const flagBtn = document.getElementById('rev-modal-flag-btn');
+    if (r.flags.length > 0) {
+      flagBtn.textContent = '✅ Retirer flag';
+      flagBtn.style.background = 'var(--green-dim)';
+      flagBtn.style.color = 'var(--green)';
+      flagBtn.style.border = '1px solid rgba(34,197,94,0.3)';
+    } else {
+      flagBtn.textContent = '🚩 Signaler';
+      flagBtn.style.background = 'var(--yellow-dim)';
+      flagBtn.style.color = 'var(--yellow)';
+      flagBtn.style.border = '1px solid rgba(245,158,11,0.3)';
+    }
+
+    document.getElementById('modal-review').classList.add('show');
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function reviewModalFlag() {
+  if (!currentReviewId) return;
+  const action = currentReviewFlagged ? 'remove' : 'add';
+  try {
+    await apiCall('/admin/reviews/' + currentReviewId + '/flag', { method: 'PATCH', body: JSON.stringify({ action, reason: 'admin_manual' }) });
+    showToast(action === 'add' ? 'Avis signalé' : 'Signalement retiré');
+    closeModal('modal-review');
+    loadReviewStats();
+    loadReviews(revCurrentPage);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function reviewModalDelete() {
+  if (!currentReviewId) return;
+  if (!confirm('Supprimer définitivement cet avis ? La note du professionnel sera recalculée.')) return;
+  try {
+    await apiCall('/admin/reviews/' + currentReviewId, { method: 'DELETE' });
+    showToast('Avis supprimé et notes recalculées');
+    closeModal('modal-review');
+    loadReviewStats();
+    loadReviews(revCurrentPage);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════
 (function init() {
@@ -4451,6 +4736,7 @@ async function changeSupportStatus() {
     loadModerationStats();
     loadDisputeStats();
     loadSecurityStats();
+    loadReviewStats();
   }
 })();
 </script>

@@ -6485,7 +6485,7 @@ let msgSearchTimer = null;
 
 async function loadMsgStats() {
   try {
-    const d = await apiCall('/api/admin/messaging/stats');
+    const d = await apiCall('/admin/messaging/stats');
     document.getElementById('msg-kpi-total').textContent  = d.total.toLocaleString();
     document.getElementById('msg-kpi-convs').textContent  = d.totalConversations.toLocaleString();
     document.getElementById('msg-kpi-active').textContent = d.activeConversations.toLocaleString();
@@ -6519,7 +6519,7 @@ async function loadMsgConversations(page) {
   const params = new URLSearchParams({ page });
   if (search) params.set('search', search);
   try {
-    const d = await apiCall('/api/admin/messaging/conversations?' + params);
+    const d = await apiCall('/admin/messaging/conversations?' + params);
     msgConvTotal = d.total;
     msgConvPages = d.pages;
 

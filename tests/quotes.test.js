@@ -13,6 +13,7 @@ jest.mock('../src/config/db', () => ({
     create: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
+    count: jest.fn().mockResolvedValue(0),
   },
   quoteItem: { createMany: jest.fn() },
 }));

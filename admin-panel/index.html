@@ -1229,6 +1229,13 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
           </div>
         </div>
 
+        <!-- Lien messagerie arbitrage -->
+        <div style="margin-bottom:14px;">
+          <button class="btn btn-view" id="dis-msg-btn" onclick="openDisputeConversation()" style="width:100%;justify-content:center;gap:8px;">
+            💬 Consulter la conversation client ↔ pro
+          </button>
+        </div>
+
         <!-- Raison & description -->
         <div style="background:var(--dark2);border-radius:10px;padding:14px;margin-bottom:16px;">
           <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Raison déclarée</div>
@@ -5103,6 +5110,8 @@ function debounceDisSearch() {
   disDebounceTimer = setTimeout(() => loadDisputes(1), 350);
 }
 
+let _disputeClientId = null, _disputeProUserId = null;
+
 async function openDisputeModal(id) {
   try {
     currentDisputeId = id;
@@ -5112,9 +5121,16 @@ async function openDisputeModal(id) {
 
     const client = d.client || {};
     const pro    = d.payment?.quote?.professional?.user || {};
-    document.getElementById('dis-modal-client').textContent       = (client.firstName || '') + ' ' + (client.lastName || '');
+
+    _disputeClientId  = client.id   || null;
+    _disputeProUserId = pro.id       || null;
+
+    const clientName = (client.firstName || '') + ' ' + (client.lastName || '');
+    const proName    = (pro.firstName    || '') + ' ' + (pro.lastName    || '');
+
+    document.getElementById('dis-modal-client').textContent       = clientName;
     document.getElementById('dis-modal-client-email').textContent = client.email || '';
-    document.getElementById('dis-modal-pro').textContent          = (pro.firstName || '') + ' ' + (pro.lastName || '');
+    document.getElementById('dis-modal-pro').textContent          = proName;
     document.getElementById('dis-modal-pro-email').textContent    = pro.email || '';
     document.getElementById('dis-modal-project').textContent      = d.payment?.quote?.project?.title || '--';
     document.getElementById('dis-modal-amount').textContent       = formatCurrency(d.payment?.amount || 0) + ' FCFA';
@@ -5124,11 +5140,32 @@ async function openDisputeModal(id) {
     document.getElementById('dis-modal-status').value             = d.status;
     document.getElementById('dis-modal-refund').value             = d.refundAmount || '';
 
+    // Griser le bouton messagerie si l'un des deux users est absent
+    const msgBtn = document.getElementById('dis-msg-btn');
+    if (_disputeClientId && _disputeProUserId) {
+      msgBtn.disabled = false;
+      msgBtn.title = 'Voir la conversation ' + clientName.trim() + ' ↔ ' + proName.trim();
+    } else {
+      msgBtn.disabled = true;
+      msgBtn.title = 'Participants introuvables';
+    }
+
     toggleRefundField();
     document.getElementById('modal-dispute').classList.add('show');
   } catch (err) {
     showToast('Erreur chargement litige', true);
   }
+}
+
+async function openDisputeConversation() {
+  if (!_disputeClientId || !_disputeProUserId) return;
+  const clientName = document.getElementById('dis-modal-client').textContent;
+  const proName    = document.getElementById('dis-modal-pro').textContent;
+  closeModal('modal-dispute');
+  showPage('messaging');
+  // Laisser la page se rendre, puis ouvrir le thread
+  await new Promise(r => setTimeout(r, 120));
+  openMsgThread(_disputeClientId, _disputeProUserId, clientName, proName);
 }
 
 function toggleRefundField() {

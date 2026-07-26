@@ -126,7 +126,7 @@ app.use('/api/disputes', disputeRoutes);
 // Le dashboard (index.html, 400KB+) est servi uniquement après vérification du cookie httpOnly
 const adminPanelAuth = (req, res, next) => {
   // Seule la page de login est publique
-  if (req.path === '/login.html' || req.path === '/login') return next();
+  if (req.path === '/login.html' || req.path === '/login' || req.path === '/login.js') return next();
 
   // Toute autre requête (y compris /) requiert le cookie httpOnly posé au login
   const token = req.cookies?.adminToken;

@@ -51,7 +51,15 @@ const allowedOrigins = process.env.CORS_ORIGINS
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
+
+// CSP désactivé pour /admin (scripts inline + 260 onclick dans le dashboard)
+// CSP Helmet actif sur toutes les autres routes (API, etc.)
+app.use('/admin', helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 // Initialize Firebase

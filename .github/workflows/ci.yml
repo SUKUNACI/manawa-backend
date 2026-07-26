@@ -30,3 +30,13 @@ jobs:
           NODE_ENV: test
           JWT_SECRET: ci-test-secret-key
           DATABASE_URL: postgresql://test:test@localhost:5432/test
+
+      - name: Deploy to Railway
+        if: success() && github.ref == 'refs/heads/master'
+        run: |
+          curl -s -X POST https://backboard.railway.app/graphql/v2 \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.RAILWAY_TOKEN }}" \
+            -d '{
+              "query": "mutation { serviceInstanceRedeploy(environmentId: \"b9276d6a-e698-479e-9a77-c1373679acf8\", serviceId: \"1582282d-f174-40fc-8fc2-cdf8471e750d\") }"
+            }'

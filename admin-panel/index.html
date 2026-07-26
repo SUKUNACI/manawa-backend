@@ -860,6 +860,38 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
 
     <!-- ══ PAGE: SUPPORT ══ -->
     <div class="page" id="page-support">
+      <!-- KPIs -->
+      <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:4px;">
+        <div class="kpi blue">
+          <div class="kpi-icon">🎧</div>
+          <div class="kpi-val" id="sup-kpi-total">--</div>
+          <div class="kpi-label">Total tickets</div>
+        </div>
+        <div class="kpi orange">
+          <div class="kpi-icon">🔴</div>
+          <div class="kpi-val" id="sup-kpi-open">--</div>
+          <div class="kpi-label">Ouverts</div>
+        </div>
+        <div class="kpi" style="background:rgba(232,184,75,0.08);border-color:rgba(232,184,75,0.2);">
+          <div class="kpi-icon">⏳</div>
+          <div class="kpi-val" style="color:var(--gold);" id="sup-kpi-inprogress">--</div>
+          <div class="kpi-label">En cours</div>
+        </div>
+        <div class="kpi green">
+          <div class="kpi-icon">✅</div>
+          <div class="kpi-val" id="sup-kpi-resolved">--</div>
+          <div class="kpi-label">Résolus</div>
+        </div>
+        <div class="kpi" style="background:rgba(99,102,241,0.08);border-color:rgba(99,102,241,0.2);">
+          <div class="kpi-icon">⏱️</div>
+          <div class="kpi-val" style="color:#818cf8;" id="sup-kpi-avgtime">--</div>
+          <div class="kpi-label">Temps moyen résolution</div>
+        </div>
+      </div>
+
+      <!-- Répartition par catégorie -->
+      <div id="sup-category-bars" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;"></div>
+
       <div class="filters">
         <input class="filter-input" placeholder="🔍 Rechercher par ID ticket, nom, email..." id="support-search" oninput="debounceSupportSearch()">
         <select class="filter-select" id="support-status-filter" onchange="loadSupportTickets()">
@@ -868,6 +900,14 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
           <option value="IN_PROGRESS">En cours</option>
           <option value="RESOLVED">Résolu</option>
           <option value="CLOSED">Fermé</option>
+        </select>
+        <select class="filter-select" id="support-category-filter" onchange="loadSupportTickets()">
+          <option value="">Toutes les catégories</option>
+          <option value="PAYMENT">💳 Paiement</option>
+          <option value="VERIFICATION">🛡️ Vérification</option>
+          <option value="DISPUTE">⚠️ Litige</option>
+          <option value="ACCOUNT">👤 Compte</option>
+          <option value="OTHER">❓ Autre</option>
         </select>
       </div>
       <div class="table-wrap">
@@ -2405,7 +2445,7 @@ function showPage(id, el) {
     case 'push': loadPushStats(); loadPushTokens(1); break;
     case 'messaging': loadMsgStats(); loadMsgConversations(1); break;
     case 'settings': loadSettings(); break;
-    case 'support': loadSupportTickets(); break;
+    case 'support': loadSupportStats(); loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
   }
 
@@ -5195,6 +5235,37 @@ let supportDebounceTimer = null;
 
 const SUPPORT_CATEGORIES = { PAYMENT: '💳 Paiement', VERIFICATION: '🛡️ Vérification', DISPUTE: '⚠️ Litige', ACCOUNT: '👤 Compte', OTHER: '❓ Autre' };
 const SUPPORT_STATUS = { OPEN: { label: 'Ouvert', badge: 'badge-blue' }, IN_PROGRESS: { label: 'En cours', badge: 'badge-yellow' }, RESOLVED: { label: 'Résolu', badge: 'badge-green' }, CLOSED: { label: 'Fermé', badge: 'badge-muted' } };
+const CATEGORY_COLORS = { PAYMENT: 'var(--blue)', VERIFICATION: 'var(--green)', DISPUTE: 'var(--red)', ACCOUNT: 'var(--orange)', OTHER: 'var(--muted)' };
+
+async function loadSupportStats() {
+  try {
+    const d = await apiCall('/admin/support/stats');
+    document.getElementById('sup-kpi-total').textContent      = d.total;
+    document.getElementById('sup-kpi-open').textContent       = d.open;
+    document.getElementById('sup-kpi-inprogress').textContent = d.inProgress;
+    document.getElementById('sup-kpi-resolved').textContent   = d.resolved + d.closed;
+    document.getElementById('sup-kpi-avgtime').textContent    = d.avgResolutionHours !== null
+      ? (d.avgResolutionHours < 24 ? d.avgResolutionHours + 'h' : Math.round(d.avgResolutionHours / 24) + 'j')
+      : '—';
+
+    // Mini-barres catégories
+    const barsEl = document.getElementById('sup-category-bars');
+    const total = d.total || 1;
+    barsEl.innerHTML = Object.entries(SUPPORT_CATEGORIES).map(([key, label]) => {
+      const count = d.byCategory[key] || 0;
+      const pct   = Math.round(count / total * 100);
+      const color = CATEGORY_COLORS[key] || 'var(--muted)';
+      return `<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 12px;min-width:120px;flex:1;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px;">
+          <span>${label}</span><strong style="color:${color}">${count}</strong>
+        </div>
+        <div style="height:4px;background:var(--dark2);border-radius:2px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:${color};border-radius:2px;"></div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) { /* silencieux */ }
+}
 
 function debounceSupportSearch() {
   clearTimeout(supportDebounceTimer);
@@ -5203,10 +5274,14 @@ function debounceSupportSearch() {
 
 async function loadSupportTickets() {
   try {
-    const status = document.getElementById('support-status-filter').value;
-    const search = document.getElementById('support-search').value.trim();
-    let url = '/admin/support/tickets';
-    if (status) url += '?status=' + status;
+    const status   = document.getElementById('support-status-filter').value;
+    const category = document.getElementById('support-category-filter').value;
+    const search   = document.getElementById('support-search').value.trim();
+    const params   = new URLSearchParams();
+    if (status)   params.set('status', status);
+    if (category) params.set('category', category);
+    const qs  = params.toString();
+    let url = '/admin/support/tickets' + (qs ? '?' + qs : '');
     const data = await apiCall(url);
     const tbody = document.getElementById('support-tbody');
     const empty = document.getElementById('support-empty');

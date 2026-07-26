@@ -1107,12 +1107,45 @@ router.get('/audit-logs', async (req, res, next) => {
 // 6. SUPPORT / TICKETS
 // ============================================================
 
+// GET /api/admin/support/stats
+router.get('/support/stats', async (req, res, next) => {
+  try {
+    const [total, open, inProgress, resolved, closed, byCategory] = await Promise.all([
+      prisma.supportTicket.count(),
+      prisma.supportTicket.count({ where: { status: 'OPEN' } }),
+      prisma.supportTicket.count({ where: { status: 'IN_PROGRESS' } }),
+      prisma.supportTicket.count({ where: { status: 'RESOLVED' } }),
+      prisma.supportTicket.count({ where: { status: 'CLOSED' } }),
+      prisma.supportTicket.groupBy({ by: ['category'], _count: { _all: true } }),
+    ]);
+
+    // Temps moyen de résolution : updatedAt - createdAt sur tickets résolus/fermés
+    const doneTickets = await prisma.supportTicket.findMany({
+      where: { status: { in: ['RESOLVED', 'CLOSED'] } },
+      select: { createdAt: true, updatedAt: true },
+    });
+    const avgResolutionHours = doneTickets.length
+      ? Math.round(
+          doneTickets.reduce((sum, t) => sum + (t.updatedAt - t.createdAt), 0)
+          / doneTickets.length / 3600000
+        )
+      : null;
+
+    res.json({
+      total, open, inProgress, resolved, closed,
+      avgResolutionHours,
+      byCategory: Object.fromEntries(byCategory.map(r => [r.category, r._count._all])),
+    });
+  } catch (err) { next(err); }
+});
+
 // GET /api/admin/support/tickets — tous les tickets
 router.get('/support/tickets', async (req, res, next) => {
   try {
-    const { status } = req.query;
+    const { status, category } = req.query;
     const where = {};
     if (status) where.status = status;
+    if (category) where.category = category;
 
     const tickets = await prisma.supportTicket.findMany({
       where,

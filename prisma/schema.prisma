@@ -46,6 +46,7 @@ model User {
   supportTickets      SupportTicket[]
   pushTokens          PushToken[]
   notifications       Notification[]
+  disputes            Dispute[]
 }
 
 model Professional {
@@ -287,6 +288,7 @@ model Payment {
   commissionPaid  Boolean            @default(false)
   quote           Quote              @relation(fields: [quoteId], references: [id])
   auditLogs       PaymentAuditLog[]
+  disputes        Dispute[]
 
   @@unique([quoteId, isDeposit])
 }
@@ -495,4 +497,22 @@ model BroadcastLog {
   sent         Int      @default(0)
   total        Int      @default(0)
   createdAt    DateTime @default(now())
+}
+
+model Dispute {
+  id             String    @id @default(uuid())
+  paymentId      String
+  clientId       String
+  reason         String
+  description    String?
+  status         String    @default("OPEN")  // OPEN | UNDER_REVIEW | RESOLVED_REFUND | RESOLVED_PARTIAL | RESOLVED_REJECTED
+  refundAmount   Float?
+  adminNote      String?
+  resolvedBy     String?
+  resolvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  payment        Payment   @relation(fields: [paymentId], references: [id])
+  client         User      @relation(fields: [clientId], references: [id])
 }

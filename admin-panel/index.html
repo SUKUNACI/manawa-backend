@@ -247,6 +247,10 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     <span class="ni">🛡️</span> Modération
     <span class="nav-badge" id="badge-moderation" style="display:none;">0</span>
   </div>
+  <div class="nav-item" onclick="showPage('disputes',this)">
+    <span class="ni">⚖️</span> Litiges
+    <span class="nav-badge red" id="badge-disputes" style="display:none;">0</span>
+  </div>
   <div class="nav-item" onclick="showPage('communication',this)"><span class="ni">📡</span> Communication</div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
@@ -851,6 +855,110 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       </div>
     </div>
 
+    <!-- ══ PAGE: LITIGES & REMBOURSEMENTS ══ -->
+    <div class="page" id="page-disputes">
+      <!-- KPIs -->
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px;">
+        <div class="kpi red"><div class="kpi-icon">🔴</div><div class="kpi-val" id="dis-open">--</div><div class="kpi-label">Litiges ouverts</div></div>
+        <div class="kpi orange"><div class="kpi-icon">🔍</div><div class="kpi-val" id="dis-review">--</div><div class="kpi-label">En cours d'examen</div></div>
+        <div class="kpi green"><div class="kpi-icon">✅</div><div class="kpi-val" id="dis-resolved">--</div><div class="kpi-label">Résolus (remb. + partiel)</div></div>
+        <div class="kpi blue"><div class="kpi-icon">💸</div><div class="kpi-val" id="dis-refunded">--</div><div class="kpi-label">Total remboursé (FCFA)</div></div>
+      </div>
+
+      <!-- Filtres -->
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Rechercher client, raison..." id="dis-search" oninput="debounceDisSearch()">
+        <select class="filter-select" id="dis-status-filter" onchange="loadDisputes(1)">
+          <option value="">Tous les statuts</option>
+          <option value="OPEN">Ouvert</option>
+          <option value="UNDER_REVIEW">En examen</option>
+          <option value="RESOLVED_REFUND">Remboursé intégralement</option>
+          <option value="RESOLVED_PARTIAL">Remboursé partiellement</option>
+          <option value="RESOLVED_REJECTED">Rejeté</option>
+        </select>
+      </div>
+
+      <!-- Tableau -->
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Client</th><th>Projet / Pro</th><th>Montant paiement</th><th>Raison</th><th>Statut</th><th>Actions</th></tr></thead>
+          <tbody id="dis-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="dis-empty" style="display:none;">
+        <div class="es-icon">⚖️</div>
+        <p>Aucun litige</p>
+      </div>
+      <div class="pagination" id="dis-pagination"></div>
+    </div>
+
+    <!-- MODAL: LITIGE DÉTAIL -->
+    <div class="modal-overlay" id="modal-dispute" onclick="closeModal('modal-dispute')">
+      <div class="modal" onclick="event.stopPropagation()" style="max-width:700px;">
+        <div class="modal-header">
+          <span class="modal-title" id="dis-modal-title">Litige</span>
+          <button class="modal-close" onclick="closeModal('modal-dispute')">✕</button>
+        </div>
+
+        <!-- Info paiement -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+          <div style="background:var(--dark2);border-radius:10px;padding:12px;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Client</div>
+            <div id="dis-modal-client" style="font-weight:600;font-size:14px;"></div>
+            <div id="dis-modal-client-email" style="font-size:12px;color:var(--muted);"></div>
+          </div>
+          <div style="background:var(--dark2);border-radius:10px;padding:12px;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Professionnel</div>
+            <div id="dis-modal-pro" style="font-weight:600;font-size:14px;"></div>
+            <div id="dis-modal-pro-email" style="font-size:12px;color:var(--muted);"></div>
+          </div>
+          <div style="background:var(--dark2);border-radius:10px;padding:12px;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Projet</div>
+            <div id="dis-modal-project" style="font-weight:600;font-size:14px;"></div>
+          </div>
+          <div style="background:var(--dark2);border-radius:10px;padding:12px;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Montant paiement</div>
+            <div id="dis-modal-amount" style="font-weight:700;font-size:18px;color:var(--green);"></div>
+          </div>
+        </div>
+
+        <!-- Raison & description -->
+        <div style="background:var(--dark2);border-radius:10px;padding:14px;margin-bottom:16px;">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Raison déclarée</div>
+          <div id="dis-modal-reason" style="font-weight:600;color:var(--orange);margin-bottom:8px;"></div>
+          <div id="dis-modal-desc" style="font-size:13px;color:var(--text);line-height:1.6;"></div>
+        </div>
+
+        <!-- Note admin + statut -->
+        <div style="margin-bottom:16px;">
+          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Note interne (visible admin seulement)</label>
+          <textarea id="dis-modal-note" class="filter-input" rows="2" placeholder="Note sur la décision..." style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"></textarea>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+          <div>
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Nouveau statut</label>
+            <select id="dis-modal-status" class="filter-select" onchange="toggleRefundField()" style="width:100%;box-sizing:border-box;">
+              <option value="OPEN">Ouvert</option>
+              <option value="UNDER_REVIEW">En examen</option>
+              <option value="RESOLVED_REFUND">Remboursé intégralement</option>
+              <option value="RESOLVED_PARTIAL">Remboursé partiellement</option>
+              <option value="RESOLVED_REJECTED">Rejeté</option>
+            </select>
+          </div>
+          <div id="dis-refund-field">
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Montant remboursé (FCFA)</label>
+            <input id="dis-modal-refund" type="number" class="filter-input" placeholder="Ex: 25000" style="width:100%;box-sizing:border-box;">
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;">
+          <button class="btn btn-primary" onclick="saveDisputeStatus()">💾 Enregistrer la décision</button>
+          <button class="btn btn-secondary" onclick="closeModal('modal-dispute')">Annuler</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ══ PAGE: COMMUNICATION ══ -->
     <div class="page" id="page-communication">
       <!-- KPIs -->
@@ -1061,6 +1169,7 @@ const titles = {
   finances: 'Finances & Revenus',
   analytics: 'Analytics Métier',
   moderation: 'Modération de contenu',
+  disputes: 'Litiges & Remboursements',
   communication: 'Communication',
   support: 'Support',
   deleted: 'Comptes supprimés'
@@ -1128,6 +1237,7 @@ async function doLogin() {
     document.getElementById('login-overlay').classList.add('hidden');
     loadDashboard();
     loadModerationStats();
+    loadDisputeStats();
   } catch (err) {
     errEl.textContent = err.message;
     errEl.style.display = 'block';
@@ -1201,6 +1311,7 @@ function showPage(id, el) {
     case 'finances': loadFinances(); break;
     case 'analytics': loadAnalytics(); break;
     case 'moderation': loadModeration(1); break;
+    case 'disputes': loadDisputeStats(); loadDisputes(1); break;
     case 'communication': loadCommunication(); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
@@ -3185,6 +3296,161 @@ function getTradeEmoji(trade) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// LITIGES & REMBOURSEMENTS
+// ══════════════════════════════════════════════════════════════
+
+let currentDisputeId = null;
+let disDebounceTimer = null;
+
+const DISPUTE_STATUS_LABELS = {
+  OPEN: { label: 'Ouvert', color: 'red' },
+  UNDER_REVIEW: { label: 'En examen', color: 'orange' },
+  RESOLVED_REFUND: { label: 'Remboursé', color: 'green' },
+  RESOLVED_PARTIAL: { label: 'Partiel', color: 'blue' },
+  RESOLVED_REJECTED: { label: 'Rejeté', color: 'muted' },
+};
+
+async function loadDisputeStats() {
+  try {
+    const s = await apiCall('/admin/disputes/stats');
+    document.getElementById('dis-open').textContent     = formatNumber(s.open);
+    document.getElementById('dis-review').textContent   = formatNumber(s.underReview);
+    document.getElementById('dis-resolved').textContent = formatNumber(s.resolvedRefund + s.resolvedPartial);
+    document.getElementById('dis-refunded').textContent = formatCurrency(s.totalRefunded) + ' FCFA';
+
+    // Badge nav
+    const badge = document.getElementById('badge-disputes');
+    const urgent = s.open + s.underReview;
+    if (urgent > 0) {
+      badge.textContent = urgent;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch (err) {
+    // silencieux si page non active
+  }
+}
+
+async function loadDisputes(page) {
+  try {
+    const search = document.getElementById('dis-search').value.trim();
+    const status = document.getElementById('dis-status-filter').value;
+    const params = '?page=' + page + '&limit=20'
+      + (status ? '&status=' + encodeURIComponent(status) : '')
+      + (search ? '&search=' + encodeURIComponent(search) : '');
+
+    const data = await apiCall('/admin/disputes' + params);
+    const tbody = document.getElementById('dis-tbody');
+    const empty = document.getElementById('dis-empty');
+    const pagination = document.getElementById('dis-pagination');
+
+    const disputes = data.disputes || [];
+    if (disputes.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = '';
+      pagination.innerHTML = '';
+      return;
+    }
+    empty.style.display = 'none';
+
+    tbody.innerHTML = disputes.map(d => {
+      const st = DISPUTE_STATUS_LABELS[d.status] || { label: d.status, color: 'muted' };
+      const client = d.client ? escHtml(d.client.firstName + ' ' + d.client.lastName) : '--';
+      const pro    = d.payment?.quote?.professional?.user;
+      const proName = pro ? escHtml(pro.firstName + ' ' + pro.lastName) : '--';
+      const project = d.payment?.quote?.project?.title || '--';
+      const amount  = d.payment?.amount != null ? formatCurrency(d.payment.amount) + ' FCFA' : '--';
+      return '<tr>'
+        + '<td style="font-size:12px;color:var(--muted);">' + new Date(d.createdAt).toLocaleDateString('fr-FR') + '</td>'
+        + '<td><strong>' + client + '</strong><br><span style="font-size:11px;color:var(--muted);">' + escHtml(d.client?.email || '') + '</span></td>'
+        + '<td><span style="font-size:13px;">' + escHtml(project) + '</span><br><span style="font-size:11px;color:var(--muted);">' + proName + '</span></td>'
+        + '<td style="font-weight:600;color:var(--green);">' + amount + '</td>'
+        + '<td style="max-width:160px;font-size:13px;">' + escHtml(d.reason) + '</td>'
+        + '<td><span class="badge badge-' + st.color + '">' + st.label + '</span></td>'
+        + '<td><button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="openDisputeModal(\'' + d.id + '\')">Gérer</button></td>'
+        + '</tr>';
+    }).join('');
+
+    // Pagination
+    if (data.totalPages > 1) {
+      let html = '';
+      if (page > 1) html += '<button class="btn btn-secondary" onclick="loadDisputes(' + (page-1) + ')">← Précédent</button>';
+      html += '<span style="color:var(--muted);font-size:13px;">Page ' + page + ' / ' + data.totalPages + '</span>';
+      if (page < data.totalPages) html += '<button class="btn btn-secondary" onclick="loadDisputes(' + (page+1) + ')">Suivant →</button>';
+      pagination.innerHTML = html;
+    } else {
+      pagination.innerHTML = '';
+    }
+  } catch (err) {
+    showToast('Erreur chargement litiges', true);
+  }
+}
+
+function debounceDisSearch() {
+  clearTimeout(disDebounceTimer);
+  disDebounceTimer = setTimeout(() => loadDisputes(1), 350);
+}
+
+async function openDisputeModal(id) {
+  try {
+    currentDisputeId = id;
+    const d = await apiCall('/admin/disputes/' + id);
+
+    document.getElementById('dis-modal-title').textContent = 'Litige — ' + (DISPUTE_STATUS_LABELS[d.status]?.label || d.status);
+
+    const client = d.client || {};
+    const pro    = d.payment?.quote?.professional?.user || {};
+    document.getElementById('dis-modal-client').textContent       = (client.firstName || '') + ' ' + (client.lastName || '');
+    document.getElementById('dis-modal-client-email').textContent = client.email || '';
+    document.getElementById('dis-modal-pro').textContent          = (pro.firstName || '') + ' ' + (pro.lastName || '');
+    document.getElementById('dis-modal-pro-email').textContent    = pro.email || '';
+    document.getElementById('dis-modal-project').textContent      = d.payment?.quote?.project?.title || '--';
+    document.getElementById('dis-modal-amount').textContent       = formatCurrency(d.payment?.amount || 0) + ' FCFA';
+    document.getElementById('dis-modal-reason').textContent       = d.reason;
+    document.getElementById('dis-modal-desc').textContent         = d.description || '(aucune description)';
+    document.getElementById('dis-modal-note').value               = d.adminNote || '';
+    document.getElementById('dis-modal-status').value             = d.status;
+    document.getElementById('dis-modal-refund').value             = d.refundAmount || '';
+
+    toggleRefundField();
+    document.getElementById('modal-dispute').classList.add('show');
+  } catch (err) {
+    showToast('Erreur chargement litige', true);
+  }
+}
+
+function toggleRefundField() {
+  const status = document.getElementById('dis-modal-status').value;
+  const show = status === 'RESOLVED_REFUND' || status === 'RESOLVED_PARTIAL';
+  document.getElementById('dis-refund-field').style.display = show ? '' : 'none';
+}
+
+async function saveDisputeStatus() {
+  const status      = document.getElementById('dis-modal-status').value;
+  const adminNote   = document.getElementById('dis-modal-note').value.trim();
+  const refundAmount = parseFloat(document.getElementById('dis-modal-refund').value);
+
+  if ((status === 'RESOLVED_REFUND' || status === 'RESOLVED_PARTIAL') && (!refundAmount || refundAmount <= 0)) {
+    showToast('Saisissez un montant de remboursement', true);
+    return;
+  }
+
+  try {
+    await apiCall('/admin/disputes/' + currentDisputeId + '/status', {
+      method: 'PATCH',
+      body: JSON.stringify({ status, adminNote, refundAmount: refundAmount || undefined }),
+    });
+    showToast('✅ Litige mis à jour');
+    closeModal('modal-dispute');
+    loadDisputeStats();
+    loadDisputes(1);
+  } catch (err) {
+    showToast('Erreur : ' + (err.message || 'Mise à jour échouée'), true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // COMMUNICATION
 // ══════════════════════════════════════════════════════════════
 
@@ -3436,6 +3702,7 @@ async function changeSupportStatus() {
     } catch(e) {}
     loadDashboard();
     loadModerationStats();
+    loadDisputeStats();
   }
 })();
 </script>

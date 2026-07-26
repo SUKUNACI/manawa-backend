@@ -855,9 +855,13 @@ router.get('/payments', async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const skip = (page - 1) * limit;
-    const { status, dateFrom, dateTo, amountMin, amountMax, search } = req.query;
+    const { status, dateFrom, dateTo, amountMin, amountMax, search, isDeposit } = req.query;
 
     const where = {};
+
+    if (isDeposit !== undefined) {
+      where.isDeposit = isDeposit === 'true';
+    }
 
     if (search) {
       where.OR = [

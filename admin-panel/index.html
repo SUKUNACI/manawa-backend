@@ -472,11 +472,27 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
 
     <!-- ══ PAGE: PAIEMENTS ══ -->
     <div class="page" id="page-payments">
-      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;" id="payments-kpis">
+      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px;" id="payments-kpis">
         <div class="kpi green"><div class="kpi-icon">✅</div><div class="kpi-val" id="pay-revenue">--</div><div class="kpi-label">FCFA encaissés (total)</div></div>
         <div class="kpi blue"><div class="kpi-icon">📊</div><div class="kpi-val" id="pay-count">--</div><div class="kpi-label">Transactions réussies</div></div>
         <div class="kpi red"><div class="kpi-icon">✕</div><div class="kpi-val" id="pay-failed">--</div><div class="kpi-label">Paiements échoués</div></div>
       </div>
+
+      <!-- Graphique CA mensuel paiements -->
+      <div class="chart-card" style="margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <h3 style="margin:0;">💹 CA mensuel (12 mois)</h3>
+          <div style="display:flex;gap:16px;">
+            <span style="font-size:12px;color:var(--muted);">Acomptes : <strong style="color:var(--orange);" id="pay-chart-deposit">--</strong></span>
+            <span style="font-size:12px;color:var(--muted);">Soldes : <strong style="color:var(--blue);" id="pay-chart-balance">--</strong></span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:6px;height:100px;" id="pay-revenue-chart">
+          <div class="loading-spinner"></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px;" id="pay-revenue-labels"></div>
+      </div>
+
       <div class="filters">
         <input class="filter-input" placeholder="🔍 Rechercher un paiement…" id="pay-search" oninput="loadPayments(1)">
         <select class="filter-select" id="pay-status-filter" onchange="loadPayments(1)">
@@ -484,6 +500,11 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
           <option value="succeeded">Succès</option>
           <option value="pending">En attente</option>
           <option value="failed">Échoué</option>
+        </select>
+        <select class="filter-select" id="pay-type-filter" onchange="loadPayments(1)">
+          <option value="">Tous les types</option>
+          <option value="deposit">Acompte 30%</option>
+          <option value="balance">Solde 70%</option>
         </select>
       </div>
       <div class="table-wrap">
@@ -1678,6 +1699,45 @@ async function loadPaymentStats() {
     document.getElementById('pay-revenue').textContent = formatCurrency(stats.totalRevenue);
     document.getElementById('pay-count').textContent = formatNumber(stats.totalSuccessfulPayments);
     document.getElementById('pay-failed').textContent = formatNumber(stats.failedPayments);
+
+    // Graphique CA mensuel
+    const revenueByMonth = stats.revenueByMonth || {};
+    const now = new Date();
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      const shortLabel = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'][d.getMonth()];
+      months.push({ key, label: shortLabel, val: revenueByMonth[key] || 0 });
+    }
+    const maxRev = Math.max(...months.map(m => m.val), 1);
+    document.getElementById('pay-revenue-chart').innerHTML = months.map(m =>
+      '<div class="bar-item" style="flex:1;">' +
+        '<div style="font-size:9px;color:var(--green);font-weight:600;margin-bottom:2px;">' + (m.val > 0 ? formatCurrency(m.val) : '') + '</div>' +
+        '<div style="width:100%;border-radius:6px 6px 0 0;background:' + (m.val > 0 ? 'linear-gradient(180deg,var(--green),rgba(34,197,94,0.3))' : 'rgba(255,255,255,0.04)') + ';height:' + Math.max(3, (m.val / maxRev) * 100) + '%;"></div>' +
+      '</div>'
+    ).join('');
+    document.getElementById('pay-revenue-labels').innerHTML = months.map(m =>
+      '<div style="flex:1;text-align:center;font-size:9px;color:var(--muted);">' + m.label + '</div>'
+    ).join('');
+
+    // Totaux acomptes vs soldes
+    try {
+      const [deposits, balances] = await Promise.all([
+        apiCall('/admin/payments?status=succeeded&limit=1'),
+        apiCall('/admin/payments?status=succeeded&limit=1'),
+      ]);
+      // Calcul depuis les paiements succeeded
+      const allSucceeded = await apiCall('/admin/payments?status=succeeded&limit=100');
+      let depTotal = 0, balTotal = 0;
+      (allSucceeded.payments || []).forEach(p => {
+        if (p.isDeposit === true) depTotal += p.amount;
+        else if (p.isDeposit === false) balTotal += p.amount;
+      });
+      document.getElementById('pay-chart-deposit').textContent = formatCurrency(depTotal) + ' FCFA';
+      document.getElementById('pay-chart-balance').textContent = formatCurrency(balTotal) + ' FCFA';
+    } catch(e) {}
+
   } catch (err) {
     if (err.message !== 'Unauthorized') {
       console.error('Payment stats error:', err);
@@ -1689,10 +1749,13 @@ async function loadPayments(page) {
   payCurrentPage = page;
   const status = document.getElementById('pay-status-filter').value;
   const search = document.getElementById('pay-search').value;
+  const type = document.getElementById('pay-type-filter').value;
 
   let url = '/admin/payments?page=' + page + '&limit=15';
   if (status) url += '&status=' + encodeURIComponent(status);
   if (search) url += '&search=' + encodeURIComponent(search);
+  if (type === 'deposit') url += '&isDeposit=true';
+  else if (type === 'balance') url += '&isDeposit=false';
 
   try {
     const data = await apiCall(url);

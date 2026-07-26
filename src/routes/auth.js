@@ -60,8 +60,9 @@ router.post(
 
       const { email, password, firstName, lastName, role, phone, city, trades, accountType, companyName } = req.body;
 
-      // Le rôle ADMIN ne peut jamais être créé via l'API publique
-      const safeRole = role === 'PROFESSIONAL' ? 'PROFESSIONAL' : 'CLIENT';
+      if (!['CLIENT', 'PROFESSIONAL'].includes(role)) {
+        return res.status(400).json({ error: 'Rôle invalide. Valeurs acceptées : CLIENT, PROFESSIONAL' });
+      }
 
       const tradesArray = Array.isArray(trades) && trades.length > 0 ? trades.slice(0, 3) : ['Non spécifié'];
 
@@ -78,9 +79,9 @@ router.post(
           lastName,
           phone,
           city,
-          role: safeRole,
+          role,
           professional:
-            safeRole === 'PROFESSIONAL'
+            role === 'PROFESSIONAL'
               ? { create: { trade: tradesArray[0], trades: tradesArray, accountType: accountType || 'INDEPENDENT', companyName: accountType === 'ENTREPRISE' ? companyName : undefined } }
               : undefined,
         },

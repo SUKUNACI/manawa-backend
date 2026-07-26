@@ -1747,6 +1747,207 @@ router.get('/analytics', async (req, res, next) => {
 });
 
 // ──────────────────────────────────────────────────────────────
+// SÉCURITÉ & CONFORMITÉ
+// ──────────────────────────────────────────────────────────────
+
+// GET /api/admin/security/stats
+router.get('/security/stats', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const oneHourAgo   = new Date(now.getTime() - 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo  = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000);
+
+    const [
+      suspendedCount,
+      archivedCount,
+      emailUnverified,
+      emailUnverified30d,
+      resetActive,
+      resetStale,       // resets actifs depuis >1h (risque potentiel)
+      otpOrphans,       // phoneOtpCode présent mais expiré
+      recentAdminActions,
+      reportsPending,
+      disputesOpen,
+    ] = await Promise.all([
+      prisma.user.count({ where: { suspended: true, deletedAt: null } }),
+      prisma.user.count({ where: { deletedAt: { not: null } } }),
+      prisma.user.count({ where: { emailVerified: false, deletedAt: null } }),
+      // Inscrits depuis >30j avec email non vérifié
+      prisma.user.count({ where: { emailVerified: false, deletedAt: null, createdAt: { lt: thirtyDaysAgo } } }),
+      // Resets actifs (code présent + pas encore expiré)
+      prisma.user.count({ where: { passwordResetCode: { not: null }, passwordResetExpiry: { gt: now }, deletedAt: null } }),
+      // Resets émis depuis >1h mais encore valides (code envoyé mais pas utilisé)
+      prisma.user.count({ where: { passwordResetCode: { not: null }, passwordResetExpiry: { gt: now }, updatedAt: { lt: oneHourAgo }, deletedAt: null } }),
+      // OTP téléphone présent mais expiré (non nettoyé)
+      prisma.user.count({ where: { phoneOtpCode: { not: null }, phoneOtpExpiry: { lt: now }, deletedAt: null } }),
+      // Actions admin récentes = BroadcastLog + disputes résolues + signalements résolus (7j)
+      Promise.all([
+        prisma.broadcastLog.count({ where: { createdAt: { gte: sevenDaysAgo } } }),
+        prisma.dispute.count({ where: { resolvedAt: { gte: sevenDaysAgo } } }),
+        prisma.contentReport.count({ where: { resolvedAt: { gte: sevenDaysAgo } } }),
+      ]).then(([b, d, c]) => b + d + c),
+      prisma.contentReport.count({ where: { status: 'PENDING' } }),
+      prisma.dispute.count({ where: { status: { in: ['OPEN', 'UNDER_REVIEW'] } } }),
+    ]);
+
+    res.json({
+      suspendedCount,
+      archivedCount,
+      emailUnverified,
+      emailUnverified30d,
+      resetActive,
+      resetStale,
+      otpOrphans,
+      recentAdminActions,
+      reportsPending,
+      disputesOpen,
+    });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/security/suspended — comptes suspendus paginés
+router.get('/security/suspended', async (req, res, next) => {
+  try {
+    const { search = '', page = 1, limit = 20 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+    const where = { suspended: true, deletedAt: null };
+    if (search) {
+      where.OR = [
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName:  { contains: search, mode: 'insensitive' } },
+        { email:     { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: { id: true, firstName: true, lastName: true, email: true, role: true, city: true, updatedAt: true },
+        orderBy: { updatedAt: 'desc' },
+        skip, take: Number(limit),
+      }),
+      prisma.user.count({ where }),
+    ]);
+    res.json({ users, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/security/alerts — alertes sécurité
+router.get('/security/alerts', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const oneHourAgo    = new Date(now.getTime() - 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const [staleResets, unverifiedOld, otpOrphans] = await Promise.all([
+      // Resets de mdp non utilisés depuis >1h mais encore valides
+      prisma.user.findMany({
+        where: { passwordResetCode: { not: null }, passwordResetExpiry: { gt: now }, updatedAt: { lt: oneHourAgo }, deletedAt: null },
+        select: { id: true, firstName: true, lastName: true, email: true, updatedAt: true },
+        orderBy: { updatedAt: 'asc' },
+        take: 30,
+      }),
+      // Emails non vérifiés depuis >30j
+      prisma.user.findMany({
+        where: { emailVerified: false, deletedAt: null, createdAt: { lt: thirtyDaysAgo } },
+        select: { id: true, firstName: true, lastName: true, email: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+        take: 30,
+      }),
+      // OTP téléphone présent mais expiré
+      prisma.user.findMany({
+        where: { phoneOtpCode: { not: null }, phoneOtpExpiry: { lt: now }, deletedAt: null },
+        select: { id: true, firstName: true, lastName: true, email: true },
+        take: 20,
+      }),
+    ]);
+
+    res.json({ staleResets, unverifiedOld, otpOrphans });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/security/activity — journal des actions admin récentes
+router.get('/security/activity', async (req, res, next) => {
+  try {
+    const { limit = 30 } = req.query;
+    const take = Math.min(100, Number(limit));
+
+    const [broadcasts, disputes, reports, auditLogs] = await Promise.all([
+      prisma.broadcastLog.findMany({
+        orderBy: { createdAt: 'desc' },
+        take,
+        select: { id: true, adminId: true, title: true, target: true, sent: true, total: true, createdAt: true },
+      }),
+      prisma.dispute.findMany({
+        where: { resolvedAt: { not: null } },
+        orderBy: { resolvedAt: 'desc' },
+        take,
+        select: { id: true, resolvedBy: true, status: true, refundAmount: true, resolvedAt: true, reason: true },
+      }),
+      prisma.contentReport.findMany({
+        where: { status: { not: 'PENDING' }, resolvedAt: { not: null } },
+        orderBy: { resolvedAt: 'desc' },
+        take,
+        select: { id: true, resolvedBy: true, status: true, contentType: true, reason: true, resolvedAt: true },
+      }),
+      prisma.paymentAuditLog.findMany({
+        where: { triggeredBy: { not: 'system' }, triggeredBy: { not: null } },
+        orderBy: { createdAt: 'desc' },
+        take: Math.min(take, 20),
+        select: { id: true, triggeredBy: true, fromStatus: true, toStatus: true, reason: true, createdAt: true, payment: { select: { amount: true } } },
+      }),
+    ]);
+
+    // Fusionner et trier par date décroissante
+    const events = [
+      ...broadcasts.map(b => ({
+        type: 'broadcast', date: b.createdAt,
+        actor: b.adminId,
+        summary: 'Broadcast "' + b.title + '" → ' + b.target + ' (' + b.sent + '/' + b.total + ' envoyés)',
+      })),
+      ...disputes.map(d => ({
+        type: 'dispute', date: d.resolvedAt,
+        actor: d.resolvedBy,
+        summary: 'Litige résolu : ' + d.status + (d.refundAmount ? ' (' + d.refundAmount + ' FCFA remboursés)' : ''),
+      })),
+      ...reports.map(r => ({
+        type: 'report', date: r.resolvedAt,
+        actor: r.resolvedBy,
+        summary: 'Signalement ' + r.contentType + ' : ' + r.status + ' — ' + r.reason,
+      })),
+      ...auditLogs.map(a => ({
+        type: 'payment', date: a.createdAt,
+        actor: a.triggeredBy,
+        summary: 'Paiement ' + a.fromStatus + ' → ' + a.toStatus + (a.payment?.amount ? ' (' + a.payment.amount + ' FCFA)' : ''),
+      })),
+    ]
+      .filter(e => e.date)
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, take);
+
+    res.json({ events });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/security/clean-otps — nettoyer les OTP expirés
+router.post('/security/clean-otps', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const [otpResult, resetResult] = await Promise.all([
+      prisma.user.updateMany({
+        where: { phoneOtpCode: { not: null }, phoneOtpExpiry: { lt: now } },
+        data: { phoneOtpCode: null, phoneOtpExpiry: null },
+      }),
+      prisma.user.updateMany({
+        where: { passwordResetCode: { not: null }, passwordResetExpiry: { lt: now } },
+        data: { passwordResetCode: null, passwordResetExpiry: null },
+      }),
+    ]);
+    res.json({ cleaned: otpResult.count + resetResult.count, otpCleaned: otpResult.count, resetCleaned: resetResult.count });
+  } catch (err) { next(err); }
+});
+
+// ──────────────────────────────────────────────────────────────
 // MARCHÉ & OPPORTUNITÉS
 // ──────────────────────────────────────────────────────────────
 

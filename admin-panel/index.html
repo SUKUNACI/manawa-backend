@@ -1287,9 +1287,51 @@ async function viewProfessional(proId) {
       html += '</div>';
     }
 
+    // Barre d'actions admin
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;padding:16px;background:var(--dark3);border:1px solid var(--border);border-radius:14px;margin-bottom:8px;">';
+    html += '<span style="font-size:11px;color:var(--muted);align-self:center;text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-right:4px;">Actions :</span>';
+    if (u.suspended) {
+      html += '<button class="btn btn-approve" onclick="reactivatePro(\'' + data.id + '\',\'' + escAttr(name) + '\')">↺ Réactiver</button>';
+    } else {
+      html += '<button class="btn btn-reject" onclick="suspendPro(\'' + data.id + '\',\'' + escAttr(name) + '\')">⏸ Suspendre</button>';
+    }
+    if (!data.hasDecennaleInsurance) {
+      html += '<button class="btn btn-approve" onclick="verifyDecennale(\'' + data.id + '\',\'' + escAttr(name) + '\')">🛡️ Valider décennale</button>';
+    }
+    html += '<button class="btn btn-view" onclick="resetProPassword(\'' + u.id + '\',\'' + escAttr(name) + '\')">🔑 Reset mot de passe</button>';
+    html += '<button class="btn btn-reject" onclick="closeModal(\'modal-project\');deleteProfessional(\'' + data.id + '\',\'' + escAttr(name) + '\')">🗑 Supprimer</button>';
+    html += '</div>';
+
     document.getElementById('mp-title').textContent = 'Profil — ' + name;
     document.getElementById('mp-content').innerHTML = html;
     document.getElementById('modal-project').classList.add('show');
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function verifyDecennale(proId, name) {
+  if (!confirm('Valider l\'assurance décennale de ' + name + ' ?')) return;
+  try {
+    await apiCall('/admin/professionals/' + proId + '/verify-decennale', { method: 'PATCH' });
+    showToast('Assurance décennale validée pour ' + name);
+    viewProfessional(proId);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function resetProPassword(userId, name) {
+  if (!confirm('Réinitialiser le mot de passe de ' + name + ' ? Un mot de passe temporaire sera généré.')) return;
+  try {
+    const res = await apiCall('/admin/users/' + userId + '/reset-password', { method: 'POST' });
+    document.getElementById('mp-title').textContent = 'Nouveau mot de passe — ' + name;
+    document.getElementById('mp-content').innerHTML =
+      '<div style="background:var(--green-dim);border:1px solid rgba(34,197,94,0.3);border-radius:14px;padding:20px;text-align:center;">' +
+        '<p style="font-size:13px;color:var(--muted);margin-bottom:12px;">Mot de passe temporaire généré :</p>' +
+        '<p style="font-family:monospace;font-size:22px;font-weight:700;color:var(--green);letter-spacing:2px;">' + escHtml(res.temporaryPassword) + '</p>' +
+        '<p style="font-size:12px;color:var(--muted);margin-top:12px;">Transmets ce mot de passe à l\'utilisateur. Il pourra le changer depuis l\'app.</p>' +
+      '</div>';
   } catch (err) {
     showToast('Erreur: ' + err.message, true);
   }
@@ -1357,7 +1399,7 @@ async function loadClients(page) {
         ? '<button class="btn btn-approve" onclick="event.stopPropagation();reactivateUser(\'' + u.id + '\',\'' + escAttr(name) + '\')">↺ Réactiver</button>'
         : '<button class="btn btn-reject" onclick="event.stopPropagation();suspendUser(\'' + u.id + '\',\'' + escAttr(name) + '\')">⏸ Suspendre</button>';
 
-      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(u.id) + '" onclick="navigator.clipboard.writeText(\'' + escAttr(u.id) + '\');showToast(\'ID copié\')">' + escHtml(u.id.substring(0, 6)) + '</span></td><td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + (u.phone ? ' · ' + escHtml(u.phone) : '') + '</span></td><td>' + escHtml(u.city || '-') + '</td><td>' + statusBadge + '</td><td>' + formatDate(u.createdAt) + '</td><td class="td-actions">' + actions + '<button class="btn btn-reject" onclick="event.stopPropagation();deleteUser(\'' + u.id + '\',\'' + escAttr(name) + '\')" title="Supprimer">🗑</button></td></tr>';
+      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(u.id) + '" onclick="navigator.clipboard.writeText(\'' + escAttr(u.id) + '\');showToast(\'ID copié\')">' + escHtml(u.id.substring(0, 6)) + '</span></td><td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + (u.phone ? ' · ' + escHtml(u.phone) : '') + '</span></td><td>' + escHtml(u.city || '-') + '</td><td>' + statusBadge + '</td><td>' + formatDate(u.createdAt) + '</td><td class="td-actions">' + actions + '<button class="btn btn-view" onclick="event.stopPropagation();resetClientPassword(\'' + u.id + '\',\'' + escAttr(name) + '\')" title="Reset mot de passe">🔑</button><button class="btn btn-reject" onclick="event.stopPropagation();deleteUser(\'' + u.id + '\',\'' + escAttr(name) + '\')" title="Supprimer">🗑</button></td></tr>';
     }).join('');
 
     // Pagination
@@ -1404,6 +1446,18 @@ async function deleteUser(userId, name) {
     await apiCall('/admin/users/' + userId, { method: 'DELETE' });
     showToast('Compte de ' + name + ' supprimé');
     loadClients(clientsCurrentPage);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function resetClientPassword(userId, name) {
+  if (!confirm('Réinitialiser le mot de passe de ' + name + ' ?')) return;
+  try {
+    const res = await apiCall('/admin/users/' + userId + '/reset-password', { method: 'POST' });
+    showToast('Mot de passe temporaire : ' + res.temporaryPassword);
+    // Afficher dans une alerte pour que l'admin puisse le copier
+    alert('Mot de passe temporaire de ' + name + ' :\n\n' + res.temporaryPassword + '\n\nTransmets-le à l\'utilisateur.');
   } catch (err) {
     showToast('Erreur: ' + err.message, true);
   }

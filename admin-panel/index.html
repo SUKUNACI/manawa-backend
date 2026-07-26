@@ -1462,11 +1462,17 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
           <h3>🌐 Application</h3>
           <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
             <div>
-              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Nom de l'application</label>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">
+                Nom de l'application
+                <span id="cfg-app-name-badge" style="display:none;background:var(--dark4);color:var(--muted);font-size:10px;padding:2px 7px;border-radius:6px;margin-left:6px;">🔒 lecture seule</span>
+              </label>
               <input type="text" id="cfg-app-name" class="filter-input" style="width:200px;" placeholder="MANAWA">
             </div>
             <div>
-              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Email de support</label>
+              <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">
+                Email de support
+                <span id="cfg-support-email-badge" style="display:none;background:var(--dark4);color:var(--muted);font-size:10px;padding:2px 7px;border-radius:6px;margin-left:6px;">🔒 lecture seule</span>
+              </label>
               <input type="email" id="cfg-support-email" class="filter-input" style="width:260px;" placeholder="support@manawa.app">
             </div>
             <div>
@@ -1579,6 +1585,21 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     <div id="fin-detail-body"></div>
     <div class="modal-actions" style="margin-top:16px;">
       <button class="btn btn-view" onclick="closeModal('modal-fin-detail')">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: CONFIRMATION PARAMÈTRE SENSIBLE ══ -->
+<div class="modal-overlay" id="modal-cfg-confirm">
+  <div class="modal" style="width:440px;">
+    <h2>🔑 Confirmation requise</h2>
+    <p>La modification de <strong id="cfg-confirm-keys" style="color:var(--orange);"></strong> est une opération sensible.<br>Saisissez votre mot de passe admin pour confirmer.</p>
+    <div class="login-error" id="cfg-confirm-error" style="display:none;margin-bottom:12px;"></div>
+    <label style="display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;">Mot de passe admin</label>
+    <input type="password" id="cfg-confirm-password" class="filter-input" style="width:100%;margin-bottom:4px;" placeholder="Votre mot de passe" onkeydown="if(event.key==='Enter')confirmSaveConfig()">
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn btn-view" onclick="closeModal('modal-cfg-confirm')">Annuler</button>
+      <button class="btn btn-approve" id="cfg-confirm-btn" onclick="confirmSaveConfig()">Confirmer</button>
     </div>
   </div>
 </div>
@@ -4639,6 +4660,7 @@ async function changeSupportStatus() {
 // CONFIGURATION & PARAMÈTRES
 // ══════════════════════════════════════════════════════════════
 let settingsCache = {};
+let pendingConfigUpdates = {}; // stocke les updates en attente de confirmation
 
 async function loadSettings() {
   try {
@@ -4648,14 +4670,18 @@ async function loadSettings() {
     // Finances
     const cr = cfg['commission_rate'];
     if (cr) {
-      document.getElementById('cfg-commission-rate').value = parseFloat(cr.value) * 100;
+      const input = document.getElementById('cfg-commission-rate');
+      input.value = parseFloat(cr.value) * 100;
+      input.disabled = cr.readonly || false;
       document.getElementById('cfg-commission-desc').textContent = cr.description || '';
     }
 
-    // Abonnements
-    if (cfg['price_essentiel']) document.getElementById('cfg-price-essentiel').value = cfg['price_essentiel'].value;
-    if (cfg['price_pro']) document.getElementById('cfg-price-pro').value = cfg['price_pro'].value;
-    if (cfg['price_elite']) document.getElementById('cfg-price-elite').value = cfg['price_elite'].value;
+    // Abonnements — readonly check
+    ['price_essentiel','price_pro','price_elite'].forEach(k => {
+      const id = 'cfg-price-' + k.replace('price_','');
+      const el = document.getElementById(id);
+      if (cfg[k] && el) { el.value = cfg[k].value; el.disabled = cfg[k].readonly || false; }
+    });
 
     // Limites
     if (cfg['trial_days']) document.getElementById('cfg-trial-days').value = cfg['trial_days'].value;
@@ -4664,18 +4690,30 @@ async function loadSettings() {
     if (cfg['max_trades_premium']) document.getElementById('cfg-max-trades-premium').value = cfg['max_trades_premium'].value;
     if (cfg['intervention_radius_km']) document.getElementById('cfg-intervention-radius').value = cfg['intervention_radius_km'].value;
 
-    // Application
-    if (cfg['app_name']) document.getElementById('cfg-app-name').value = cfg['app_name'].value;
-    if (cfg['support_email']) document.getElementById('cfg-support-email').value = cfg['support_email'].value;
-    if (cfg['app_maintenance_mode']) document.getElementById('cfg-maintenance-mode').value = cfg['app_maintenance_mode'].value;
+    // Application — readonly : input désactivé + cadenas visible
+    const appNameEl = document.getElementById('cfg-app-name');
+    const supportEmailEl = document.getElementById('cfg-support-email');
+    if (cfg['app_name']) { appNameEl.value = cfg['app_name'].value; appNameEl.disabled = cfg['app_name'].readonly || false; }
+    if (cfg['support_email']) { supportEmailEl.value = cfg['support_email'].value; supportEmailEl.disabled = cfg['support_email'].readonly || false; }
+    if (cfg['app_maintenance_mode']) {
+      const el = document.getElementById('cfg-maintenance-mode');
+      el.value = cfg['app_maintenance_mode'].value;
+      el.disabled = cfg['app_maintenance_mode'].readonly || false;
+    }
+
+    // Badges readonly sur la carte Application
+    document.getElementById('cfg-app-name-badge').style.display = cfg['app_name']?.readonly ? '' : 'none';
+    document.getElementById('cfg-support-email-badge').style.display = cfg['support_email']?.readonly ? '' : 'none';
 
     // Tableau
     const tbody = document.getElementById('cfg-table-body');
     tbody.innerHTML = Object.entries(cfg).map(([key, v]) => {
       const val = key === 'commission_rate' ? (parseFloat(v.value) * 100).toFixed(1) + '%' : escHtml(v.value);
       const maint = key === 'app_maintenance_mode' && v.value === 'true';
+      const roTag = v.readonly ? '<span style="background:var(--dark4);color:var(--muted);font-size:10px;padding:2px 7px;border-radius:6px;margin-left:6px;">🔒 lecture seule</span>' : '';
+      const confTag = v.requiresConfirmation ? '<span style="background:var(--yellow-dim);color:var(--yellow);font-size:10px;padding:2px 7px;border-radius:6px;margin-left:4px;">🔑 confirmation</span>' : '';
       return '<tr>' +
-        '<td><code style="color:var(--orange);font-size:12px;">' + escHtml(key) + '</code></td>' +
+        '<td><code style="color:var(--orange);font-size:12px;">' + escHtml(key) + '</code>' + roTag + confTag + '</td>' +
         '<td><strong style="color:' + (maint ? 'var(--red)' : 'var(--white)') + ';">' + val + '</strong></td>' +
         '<td style="color:var(--muted);font-size:12px;">' + escHtml(v.description || '') + '</td>' +
         '<td style="font-size:11px;color:var(--muted);">' + (v.updatedBy ? v.updatedBy.substring(0, 8) + '…' : '—') + '</td>' +
@@ -4687,21 +4725,18 @@ async function loadSettings() {
   }
 }
 
-async function saveConfig(section) {
+function buildUpdates(section) {
   const updates = {};
-
   if (section === 'finances') {
     const val = parseFloat(document.getElementById('cfg-commission-rate').value);
-    if (isNaN(val) || val < 0 || val > 50) { showToast('Taux invalide (0–50%)', true); return; }
+    if (isNaN(val) || val < 0 || val > 50) { showToast('Taux invalide (0–50%)', true); return null; }
     updates['commission_rate'] = (val / 100).toFixed(4);
   }
-
   if (section === 'abonnements') {
     updates['price_essentiel'] = parseInt(document.getElementById('cfg-price-essentiel').value) || 2500;
     updates['price_pro'] = parseInt(document.getElementById('cfg-price-pro').value) || 5000;
     updates['price_elite'] = parseInt(document.getElementById('cfg-price-elite').value) || 10000;
   }
-
   if (section === 'limites') {
     updates['trial_days'] = parseInt(document.getElementById('cfg-trial-days').value) || 14;
     updates['max_quotes_essentiel'] = parseInt(document.getElementById('cfg-max-quotes-essentiel').value) || 20;
@@ -4709,23 +4744,66 @@ async function saveConfig(section) {
     updates['max_trades_premium'] = parseInt(document.getElementById('cfg-max-trades-premium').value) || 6;
     updates['intervention_radius_km'] = parseInt(document.getElementById('cfg-intervention-radius').value) || 30;
   }
-
   if (section === 'application') {
-    const appName = document.getElementById('cfg-app-name').value.trim();
-    const supportEmail = document.getElementById('cfg-support-email').value.trim();
     const maintenance = document.getElementById('cfg-maintenance-mode').value;
-    if (!appName) { showToast('Nom de l\'application requis', true); return; }
-    updates['app_name'] = appName;
-    updates['support_email'] = supportEmail;
     updates['app_maintenance_mode'] = maintenance;
   }
+  return updates;
+}
 
+function needsConfirmation(updates) {
+  return Object.keys(updates).some(k => settingsCache[k]?.requiresConfirmation);
+}
+
+function saveConfig(section) {
+  const updates = buildUpdates(section);
+  if (!updates || Object.keys(updates).length === 0) return;
+
+  if (needsConfirmation(updates)) {
+    // Afficher le modal de confirmation
+    pendingConfigUpdates = updates;
+    document.getElementById('cfg-confirm-error').style.display = 'none';
+    document.getElementById('cfg-confirm-password').value = '';
+    const keys = Object.keys(updates).join(', ');
+    document.getElementById('cfg-confirm-keys').textContent = keys;
+    document.getElementById('modal-cfg-confirm').classList.add('show');
+  } else {
+    doSaveConfig(updates, null);
+  }
+}
+
+async function confirmSaveConfig() {
+  const password = document.getElementById('cfg-confirm-password').value;
+  if (!password) {
+    document.getElementById('cfg-confirm-error').textContent = 'Mot de passe requis.';
+    document.getElementById('cfg-confirm-error').style.display = 'block';
+    return;
+  }
+  const btn = document.getElementById('cfg-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Vérification...';
   try {
-    await apiCall('/admin/config', { method: 'PATCH', body: JSON.stringify(updates) });
-    showToast('✅ Paramètres enregistrés');
-    loadSettings(); // Rafraîchit le tableau
+    await doSaveConfig(pendingConfigUpdates, password);
+    closeModal('modal-cfg-confirm');
+    pendingConfigUpdates = {};
   } catch (err) {
-    showToast('Erreur: ' + err.message, true);
+    document.getElementById('cfg-confirm-error').textContent = err.message || 'Erreur';
+    document.getElementById('cfg-confirm-error').style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Confirmer';
+  }
+}
+
+async function doSaveConfig(updates, confirmPassword) {
+  const body = confirmPassword ? { ...updates, confirmPassword } : updates;
+  try {
+    await apiCall('/admin/config', { method: 'PATCH', body: JSON.stringify(body) });
+    showToast('✅ Paramètres enregistrés');
+    loadSettings();
+  } catch (err) {
+    // Si le serveur indique requiresConfirmation mais qu'on en est pas passé par le modal
+    throw err;
   }
 }
 

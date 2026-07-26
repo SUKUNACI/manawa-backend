@@ -263,6 +263,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   </div>
   <div class="nav-item" onclick="showPage('companies',this)"><span class="ni">🏢</span> Entreprises</div>
   <div class="nav-item" onclick="showPage('portfolio',this)"><span class="ni">🖼️</span> Portfolios & Réalisations</div>
+  <div class="nav-item" onclick="showPage('promos',this)"><span class="ni">🎁</span> Codes Promo & Offres</div>
   <div class="nav-item" onclick="showPage('communication',this)"><span class="ni">📡</span> Communication</div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
@@ -1509,6 +1510,47 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     </div>
 
     <!-- ══ PAGE: COMPTES SUPPRIMÉS ══ -->
+    <!-- ══ PAGE: CODES PROMO & OFFRES ══ -->
+    <div class="page" id="page-promos">
+      <div class="kpi-grid" id="promos-kpis">
+        <div class="kpi orange"><div class="kpi-icon">🎁</div><div class="kpi-val" id="promo-total">--</div><div class="kpi-label">Codes créés</div></div>
+        <div class="kpi green"><div class="kpi-icon">✅</div><div class="kpi-val" id="promo-active">--</div><div class="kpi-label">Codes actifs</div></div>
+        <div class="kpi blue"><div class="kpi-icon">📊</div><div class="kpi-val" id="promo-usages">--</div><div class="kpi-label">Utilisations totales</div></div>
+        <div class="kpi red"><div class="kpi-icon">⏰</div><div class="kpi-val" id="promo-expired">--</div><div class="kpi-label">Codes expirés</div></div>
+      </div>
+      <div id="promo-top-alert" style="display:none;background:rgba(232,184,75,0.08);border:1px solid rgba(232,184,75,0.2);border-radius:14px;padding:14px 18px;margin-bottom:16px;font-size:13px;color:var(--gold);"></div>
+      <div class="section-header">
+        <h2>Tous les codes promo</h2>
+        <div class="sh-actions">
+          <button class="btn btn-approve" onclick="openPromoModal()">+ Nouveau code</button>
+        </div>
+      </div>
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Rechercher un code ou description…" id="promo-search" oninput="debouncePromos()">
+        <select class="filter-select" id="promo-status-filter" onchange="loadPromos(1)">
+          <option value="">Tous les statuts</option>
+          <option value="active">Actifs</option>
+          <option value="inactive">Désactivés</option>
+          <option value="expired">Expirés</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Code</th><th>Description</th><th>Réduction</th><th>Plans</th><th>Usages</th><th>Validité</th><th>Statut</th><th>Actions</th></tr></thead>
+          <tbody id="promo-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="promo-empty" style="display:none;">
+        <div class="es-icon">🎁</div>
+        <p>Aucun code promo trouvé</p>
+      </div>
+      <div class="pagination" id="promo-pagination" style="display:none;">
+        <button class="btn btn-view" id="promo-prev" onclick="loadPromos(promoCurrentPage-1)">← Précédent</button>
+        <span class="page-info" id="promo-page-info"></span>
+        <button class="btn btn-view" id="promo-next" onclick="loadPromos(promoCurrentPage+1)">Suivant →</button>
+      </div>
+    </div>
+
     <!-- ══ PAGE: PORTFOLIOS & RÉALISATIONS ══ -->
     <div class="page" id="page-portfolio">
       <div class="kpi-grid" id="portfolio-kpis">
@@ -1670,6 +1712,86 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   </div>
 </div>
 
+<!-- ══ MODAL: CRÉER / ÉDITER CODE PROMO ══ -->
+<div class="modal-overlay" id="modal-promo">
+  <div class="modal" style="width:560px;max-height:90vh;overflow-y:auto;">
+    <h2 id="promo-modal-title">🎁 Nouveau code promo</h2>
+    <p id="promo-modal-subtitle" style="margin-bottom:20px;">Créer un code de réduction pour les abonnements.</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;">CODE *</label>
+        <input type="text" id="promo-code" class="filter-input" style="width:100%;text-transform:uppercase;" placeholder="EX: BIENVENUE20">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;">TYPE DE RÉDUCTION *</label>
+        <select id="promo-type" class="filter-select" style="width:100%;" onchange="updatePromoValueLabel()">
+          <option value="PERCENT">Pourcentage (%)</option>
+          <option value="FIXED">Montant fixe (FCFA)</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;" id="promo-value-label">VALEUR * (%)</label>
+        <input type="number" id="promo-value" class="filter-input" style="width:100%;" placeholder="20" min="1">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;">MAX UTILISATIONS <span style="color:var(--muted);font-weight:400;">(vide = illimité)</span></label>
+        <input type="number" id="promo-max-uses" class="filter-input" style="width:100%;" placeholder="100" min="1">
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;">DESCRIPTION</label>
+      <input type="text" id="promo-desc" class="filter-input" style="width:100%;" placeholder="Offre de lancement — 20% de réduction">
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;">VALABLE DU</label>
+        <input type="datetime-local" id="promo-valid-from" class="filter-input" style="width:100%;">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;">VALABLE JUSQU'AU <span style="color:var(--muted);font-weight:400;">(vide = permanent)</span></label>
+        <input type="datetime-local" id="promo-valid-until" class="filter-input" style="width:100%;">
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;">PLANS APPLICABLES <span style="color:var(--muted);font-weight:400;">(vide = tous)</span></label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="promo-tier-essentiel" value="ESSENTIEL"> Essentiel</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="promo-tier-pro" value="PRO"> Pro</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="promo-tier-elite" value="ELITE"> Élite</label>
+      </div>
+    </div>
+
+    <div style="margin-bottom:20px;display:flex;align-items:center;gap:10px;">
+      <input type="checkbox" id="promo-active" checked style="width:16px;height:16px;cursor:pointer;">
+      <label for="promo-active" style="font-size:13px;cursor:pointer;">Code actif (utilisable immédiatement)</label>
+    </div>
+
+    <div class="login-error" id="promo-modal-error" style="display:none;margin-bottom:12px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-view" onclick="closeModal('modal-promo')">Annuler</button>
+      <button class="btn btn-approve" id="promo-modal-save-btn" onclick="savePromo()">Créer le code</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: HISTORIQUE UTILISATIONS PROMO ══ -->
+<div class="modal-overlay" id="modal-promo-usages">
+  <div class="modal" style="width:640px;max-height:85vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h2 id="promo-usages-title">Historique d'utilisation</h2>
+      <button class="btn btn-view" onclick="closeModal('modal-promo-usages')">✕ Fermer</button>
+    </div>
+    <div id="promo-usages-body"></div>
+  </div>
+</div>
+
 <!-- ══ MODAL: DÉTAIL RÉALISATION ══ -->
 <div class="modal-overlay" id="modal-portfolio-project">
   <div class="modal" style="width:760px;max-height:90vh;overflow-y:auto;">
@@ -1771,6 +1893,7 @@ const titles = {
   reviews: 'Avis & Notation',
   companies: 'Gestion des entreprises',
   portfolio: 'Portfolios & Réalisations',
+  promos: 'Codes Promo & Offres',
   settings: 'Configuration & Paramètres',
   support: 'Support',
   deleted: 'Comptes supprimés'
@@ -1922,6 +2045,7 @@ function showPage(id, el) {
     case 'reviews': loadReviewStats(); loadReviews(1); break;
     case 'companies': loadCompanyStats(); loadCompanies(1); break;
     case 'portfolio': loadPortfolioStats(); loadPortfolioProjects(1); break;
+    case 'promos': loadPromoStats(); loadPromos(1); break;
     case 'settings': loadSettings(); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
@@ -5164,6 +5288,280 @@ async function reviewModalDelete() {
     loadReviewStats();
   }
 })();
+
+// ══════════════════════════════════════════════════════════════
+// CODES PROMO & OFFRES
+// ══════════════════════════════════════════════════════════════
+let promoCurrentPage = 1;
+let promoSearchTimer = null;
+let _editingPromoId = null;
+
+async function loadPromoStats() {
+  try {
+    const s = await apiCall('/admin/promos/stats');
+    document.getElementById('promo-total').textContent = s.total ?? '--';
+    document.getElementById('promo-active').textContent = s.active ?? '--';
+    document.getElementById('promo-usages').textContent = s.totalUsages ?? '--';
+    document.getElementById('promo-expired').textContent = s.expired ?? '--';
+    const topAlert = document.getElementById('promo-top-alert');
+    if (s.topPromo && s.topPromo.usedCount > 0) {
+      topAlert.innerHTML = '🏆 Code le plus utilisé : <strong>' + escHtml(s.topPromo.code) + '</strong>' +
+        (s.topPromo.description ? ' — ' + escHtml(s.topPromo.description) : '') +
+        ' · <strong>' + s.topPromo.usedCount + ' utilisations</strong>';
+      topAlert.style.display = '';
+    }
+  } catch(e) {}
+}
+
+async function loadPromos(page) {
+  page = Math.max(1, page || 1);
+  const search = document.getElementById('promo-search').value.trim();
+  const status = document.getElementById('promo-status-filter').value;
+  const tbody = document.getElementById('promo-tbody');
+  const empty = document.getElementById('promo-empty');
+  const pag = document.getElementById('promo-pagination');
+  tbody.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"></div></td></tr>';
+
+  try {
+    let url = '/admin/promos?page=' + page;
+    if (search) url += '&search=' + encodeURIComponent(search);
+    if (status) url += '&status=' + status;
+    const data = await apiCall(url);
+    promoCurrentPage = data.page;
+    tbody.innerHTML = '';
+
+    if (!data.promos || data.promos.length === 0) {
+      empty.style.display = '';
+      pag.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+
+    const now = new Date();
+    data.promos.forEach(p => {
+      const isExpired = p.validUntil && new Date(p.validUntil) < now;
+      const isActive = p.active && !isExpired;
+      const statusBadge = !p.active
+        ? '<span class="badge badge-muted">Désactivé</span>'
+        : isExpired
+        ? '<span class="badge badge-red">Expiré</span>'
+        : '<span class="badge badge-green">Actif</span>';
+
+      const reduction = p.discountType === 'PERCENT'
+        ? '<strong style="color:var(--green);">-' + p.discountValue + '%</strong>'
+        : '<strong style="color:var(--green);">-' + p.discountValue.toLocaleString('fr-FR') + ' FCFA</strong>';
+
+      const tiers = p.applicableTiers && p.applicableTiers.length > 0
+        ? p.applicableTiers.map(t => '<span class="badge badge-blue" style="font-size:10px;">' + t + '</span>').join(' ')
+        : '<span style="font-size:11px;color:var(--muted);">Tous</span>';
+
+      const maxUses = p.maxUses ? p.usedCount + ' / ' + p.maxUses : p.usedCount + ' / ∞';
+      const usagePct = p.maxUses ? Math.round((p.usedCount / p.maxUses) * 100) : null;
+      const usageBar = usagePct !== null
+        ? `<div style="height:4px;background:rgba(255,255,255,0.08);border-radius:2px;margin-top:4px;"><div style="height:100%;width:${usagePct}%;background:var(--orange);border-radius:2px;"></div></div>`
+        : '';
+
+      const validStr = p.validUntil
+        ? 'jusqu\'au ' + new Date(p.validUntil).toLocaleDateString('fr-FR')
+        : 'Permanent';
+
+      tbody.innerHTML += `<tr>
+        <td><code style="font-size:13px;font-weight:700;color:var(--orange);letter-spacing:1px;">${escHtml(p.code)}</code></td>
+        <td style="color:var(--muted);font-size:12px;">${escHtml(p.description || '—')}</td>
+        <td>${reduction}</td>
+        <td>${tiers}</td>
+        <td>
+          <span style="font-size:13px;">${maxUses}</span>
+          ${usageBar}
+        </td>
+        <td style="font-size:12px;color:var(--muted);">${validStr}</td>
+        <td>${statusBadge}</td>
+        <td class="td-actions">
+          <button class="btn btn-view" onclick="openPromoUsages('${p.id}','${escHtml(p.code)}')">📊</button>
+          <button class="btn btn-view" onclick="openPromoModal('${p.id}')">✏️</button>
+          <button class="btn ${isActive ? 'btn-reject' : 'btn-approve'}" onclick="togglePromo('${p.id}',${p.active})">${p.active ? '⏸' : '▶'}</button>
+          <button class="btn btn-reject" onclick="deletePromo('${p.id}','${escHtml(p.code)}')">🗑️</button>
+        </td>
+      </tr>`;
+    });
+
+    pag.style.display = data.pages > 1 ? 'flex' : 'none';
+    document.getElementById('promo-page-info').textContent = 'Page ' + data.page + ' / ' + data.pages + ' — ' + data.total + ' code(s)';
+    document.getElementById('promo-prev').disabled = data.page <= 1;
+    document.getElementById('promo-next').disabled = data.page >= data.pages;
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--red);">Erreur de chargement</td></tr>';
+  }
+}
+
+function debouncePromos() {
+  clearTimeout(promoSearchTimer);
+  promoSearchTimer = setTimeout(() => loadPromos(1), 350);
+}
+
+function updatePromoValueLabel() {
+  const type = document.getElementById('promo-type').value;
+  document.getElementById('promo-value-label').textContent = 'VALEUR * ' + (type === 'PERCENT' ? '(%)' : '(FCFA)');
+}
+
+function openPromoModal(editId) {
+  _editingPromoId = editId || null;
+  const isEdit = !!editId;
+  document.getElementById('promo-modal-title').textContent = isEdit ? '✏️ Modifier le code promo' : '🎁 Nouveau code promo';
+  document.getElementById('promo-modal-subtitle').textContent = isEdit ? 'Modifier les paramètres de ce code.' : 'Créer un code de réduction pour les abonnements.';
+  document.getElementById('promo-modal-save-btn').textContent = isEdit ? 'Enregistrer' : 'Créer le code';
+  document.getElementById('promo-modal-error').style.display = 'none';
+
+  if (!isEdit) {
+    // Reset form
+    document.getElementById('promo-code').value = '';
+    document.getElementById('promo-code').disabled = false;
+    document.getElementById('promo-type').value = 'PERCENT';
+    document.getElementById('promo-value').value = '';
+    document.getElementById('promo-max-uses').value = '';
+    document.getElementById('promo-desc').value = '';
+    document.getElementById('promo-valid-from').value = '';
+    document.getElementById('promo-valid-until').value = '';
+    document.getElementById('promo-tier-essentiel').checked = false;
+    document.getElementById('promo-tier-pro').checked = false;
+    document.getElementById('promo-tier-elite').checked = false;
+    document.getElementById('promo-active').checked = true;
+    updatePromoValueLabel();
+  } else {
+    // Charger les données existantes
+    loadPromoForEdit(editId);
+  }
+
+  document.getElementById('modal-promo').classList.add('show');
+}
+
+async function loadPromoForEdit(promoId) {
+  try {
+    const data = await apiCall('/admin/promos?search=&page=1');
+    const promo = data.promos.find(p => p.id === promoId);
+    if (!promo) return;
+
+    document.getElementById('promo-code').value = promo.code;
+    document.getElementById('promo-code').disabled = true; // code non modifiable
+    document.getElementById('promo-type').value = promo.discountType;
+    document.getElementById('promo-value').value = promo.discountValue;
+    document.getElementById('promo-max-uses').value = promo.maxUses || '';
+    document.getElementById('promo-desc').value = promo.description || '';
+    document.getElementById('promo-valid-from').value = promo.validFrom ? promo.validFrom.slice(0, 16) : '';
+    document.getElementById('promo-valid-until').value = promo.validUntil ? promo.validUntil.slice(0, 16) : '';
+    document.getElementById('promo-tier-essentiel').checked = promo.applicableTiers?.includes('ESSENTIEL');
+    document.getElementById('promo-tier-pro').checked = promo.applicableTiers?.includes('PRO');
+    document.getElementById('promo-tier-elite').checked = promo.applicableTiers?.includes('ELITE');
+    document.getElementById('promo-active').checked = promo.active;
+    updatePromoValueLabel();
+  } catch(e) {}
+}
+
+async function savePromo() {
+  const errEl = document.getElementById('promo-modal-error');
+  errEl.style.display = 'none';
+  const isEdit = !!_editingPromoId;
+
+  const code = document.getElementById('promo-code').value.trim().toUpperCase();
+  const discountType = document.getElementById('promo-type').value;
+  const discountValue = parseFloat(document.getElementById('promo-value').value);
+  const maxUses = document.getElementById('promo-max-uses').value || null;
+  const description = document.getElementById('promo-desc').value.trim();
+  const validFrom = document.getElementById('promo-valid-from').value || null;
+  const validUntil = document.getElementById('promo-valid-until').value || null;
+  const active = document.getElementById('promo-active').checked;
+  const applicableTiers = ['ESSENTIEL', 'PRO', 'ELITE'].filter(t =>
+    document.getElementById('promo-tier-' + t.toLowerCase()).checked
+  );
+
+  if (!isEdit && !code) { errEl.textContent = 'Le code est requis'; errEl.style.display = 'block'; return; }
+  if (isNaN(discountValue) || discountValue <= 0) { errEl.textContent = 'Valeur de réduction invalide'; errEl.style.display = 'block'; return; }
+  if (discountType === 'PERCENT' && discountValue > 100) { errEl.textContent = 'Le pourcentage ne peut pas dépasser 100%'; errEl.style.display = 'block'; return; }
+
+  const body = { discountType, discountValue, maxUses, description, validFrom, validUntil, applicableTiers, active };
+  if (!isEdit) body.code = code;
+
+  try {
+    const btn = document.getElementById('promo-modal-save-btn');
+    btn.disabled = true;
+    btn.textContent = 'Enregistrement…';
+
+    if (isEdit) {
+      await apiCall('/admin/promos/' + _editingPromoId, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      await apiCall('/admin/promos', { method: 'POST', body: JSON.stringify(body) });
+    }
+
+    closeModal('modal-promo');
+    showToast(isEdit ? 'Code promo mis à jour' : 'Code promo créé');
+    loadPromos(promoCurrentPage);
+    loadPromoStats();
+  } catch(e) {
+    errEl.textContent = e.message || 'Erreur lors de l\'enregistrement';
+    errEl.style.display = 'block';
+  } finally {
+    const btn = document.getElementById('promo-modal-save-btn');
+    btn.disabled = false;
+    btn.textContent = _editingPromoId ? 'Enregistrer' : 'Créer le code';
+  }
+}
+
+async function togglePromo(promoId, currentActive) {
+  try {
+    await apiCall('/admin/promos/' + promoId, { method: 'PATCH', body: JSON.stringify({ active: !currentActive }) });
+    showToast(currentActive ? 'Code promo désactivé' : 'Code promo activé');
+    loadPromos(promoCurrentPage);
+    loadPromoStats();
+  } catch(e) {
+    showToast('Erreur : ' + e.message, true);
+  }
+}
+
+async function deletePromo(promoId, code) {
+  if (!confirm('Supprimer le code promo "' + code + '" ? Cette action est irréversible.')) return;
+  try {
+    await apiCall('/admin/promos/' + promoId, { method: 'DELETE' });
+    showToast('Code promo supprimé');
+    loadPromos(promoCurrentPage);
+    loadPromoStats();
+  } catch(e) {
+    showToast('Erreur : ' + e.message, true);
+  }
+}
+
+async function openPromoUsages(promoId, code) {
+  document.getElementById('promo-usages-title').textContent = '📊 Utilisations — ' + code;
+  document.getElementById('promo-usages-body').innerHTML = '<div class="loading-spinner"></div>';
+  document.getElementById('modal-promo-usages').classList.add('show');
+
+  try {
+    const usages = await apiCall('/admin/promos/' + promoId + '/usages');
+    if (usages.length === 0) {
+      document.getElementById('promo-usages-body').innerHTML = '<div class="empty-state"><div class="es-icon">📊</div><p>Aucune utilisation pour ce code</p></div>';
+      return;
+    }
+
+    let html = '<div class="table-wrap"><table><thead><tr><th>Professionnel</th><th>Plan</th><th>Prix original</th><th>Réduction</th><th>Prix final</th><th>Date</th></tr></thead><tbody>';
+    usages.forEach(u => {
+      const pName = u.professional ? u.professional.user.firstName + ' ' + u.professional.user.lastName : '—';
+      html += `<tr>
+        <td>
+          <strong>${escHtml(pName)}</strong><br>
+          <span style="font-size:11px;color:var(--muted);">${escHtml(u.professional?.user?.email || '')}</span>
+        </td>
+        <td><span class="badge badge-blue">${escHtml(u.tier)}</span></td>
+        <td style="color:var(--muted);">${u.originalAmount.toLocaleString('fr-FR')} FCFA</td>
+        <td style="color:var(--green);">-${u.discountAmount.toLocaleString('fr-FR')} FCFA</td>
+        <td style="font-weight:700;color:var(--white);">${u.finalAmount.toLocaleString('fr-FR')} FCFA</td>
+        <td style="font-size:11px;color:var(--muted);">${new Date(u.usedAt).toLocaleDateString('fr-FR')}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+    document.getElementById('promo-usages-body').innerHTML = html;
+  } catch(e) {
+    document.getElementById('promo-usages-body').innerHTML = '<div style="color:var(--red);text-align:center;padding:20px;">Erreur de chargement</div>';
+  }
+}
 
 // ══════════════════════════════════════════════════════════════
 // PORTFOLIOS & RÉALISATIONS

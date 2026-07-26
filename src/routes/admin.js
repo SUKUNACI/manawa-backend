@@ -1385,4 +1385,209 @@ router.patch('/finances/payments/:paymentId/mark-paid', async (req, res, next) =
   }
 });
 
+// ══════════════════════════════════════════════════════════════
+// ANALYTICS MÉTIER
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/admin/analytics — données analytiques complètes
+router.get('/analytics', async (req, res, next) => {
+  try {
+    // ── Entonnoir de conversion ──────────────────────────────
+    const [
+      totalProjects,
+      projectsWithQuote,
+      acceptedQuotes,
+      paidProjects,
+      totalClients,
+      clientsWithMultipleProjects,
+    ] = await Promise.all([
+      prisma.project.count(),
+      prisma.project.count({ where: { quotes: { some: {} } } }),
+      prisma.quote.count({ where: { status: 'ACCEPTED' } }),
+      prisma.payment.count({ where: { status: 'succeeded', isDeposit: true } }),
+      prisma.user.count({ where: { role: 'CLIENT' } }),
+      // Clients ayant posté >1 projet
+      prisma.user.count({
+        where: {
+          role: 'CLIENT',
+          projects: { some: {} },
+        },
+      }),
+    ]);
+
+    // Clients avec ≥2 projets (fidélisation)
+    const clientProjectCounts = await prisma.project.groupBy({
+      by: ['clientId'],
+      _count: { id: true },
+      having: { id: { _count: { gt: 1 } } },
+    });
+    const repeatClients = clientProjectCounts.length;
+    const clientsWithProjects = await prisma.user.count({
+      where: { role: 'CLIENT', projects: { some: {} } },
+    });
+
+    // ── Top 10 métiers ───────────────────────────────────────
+    const tradeStats = await prisma.project.groupBy({
+      by: ['tradeNeeded'],
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 10,
+    });
+
+    // Pour chaque métier : CA total (paiements succeeded liés aux projets de ce métier)
+    const tradeRevenue = await Promise.all(
+      tradeStats.map(async (t) => {
+        const agg = await prisma.payment.aggregate({
+          where: {
+            status: 'succeeded',
+            quote: { project: { tradeNeeded: t.tradeNeeded } },
+          },
+          _sum: { amount: true },
+        });
+        const completed = await prisma.project.count({
+          where: { tradeNeeded: t.tradeNeeded, status: 'COMPLETED' },
+        });
+        return {
+          trade: t.tradeNeeded,
+          projectCount: t._count.id,
+          revenue: agg._sum.amount || 0,
+          completedCount: completed,
+          completionRate: t._count.id > 0 ? Math.round((completed / t._count.id) * 100) : 0,
+        };
+      })
+    );
+
+    // ── Top 10 pros par CA ───────────────────────────────────
+    const proRevenueRaw = await prisma.payment.groupBy({
+      by: ['quoteId'],
+      where: { status: 'succeeded' },
+      _sum: { amount: true },
+    });
+
+    // Agréger par professionnel
+    const proRevMap = {};
+    for (const row of proRevenueRaw) {
+      const quote = await prisma.quote.findUnique({
+        where: { id: row.quoteId },
+        select: {
+          professionalId: true,
+          professional: {
+            select: {
+              trade: true,
+              user: { select: { firstName: true, lastName: true, email: true, avatarUrl: true } },
+            },
+          },
+        },
+      });
+      if (!quote) continue;
+      const pid = quote.professionalId;
+      if (!proRevMap[pid]) {
+        proRevMap[pid] = {
+          professionalId: pid,
+          name: (quote.professional.user.firstName || '') + ' ' + (quote.professional.user.lastName || ''),
+          email: quote.professional.user.email,
+          trade: quote.professional.trade,
+          revenue: 0,
+          paymentCount: 0,
+        };
+      }
+      proRevMap[pid].revenue += row._sum.amount || 0;
+      proRevMap[pid].paymentCount += 1;
+    }
+    const topPros = Object.values(proRevMap)
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+
+    // ── Répartition géographique ─────────────────────────────
+    const cityStats = await prisma.project.groupBy({
+      by: ['city'],
+      _count: { id: true },
+      orderBy: { _count: { id: 'desc' } },
+      take: 10,
+      where: { city: { not: null } },
+    });
+
+    // ── Délai moyen projet → premier devis (en jours) ────────
+    const projectsWithFirstQuote = await prisma.project.findMany({
+      where: { quotes: { some: {} } },
+      select: {
+        createdAt: true,
+        quotes: { orderBy: { createdAt: 'asc' }, take: 1, select: { createdAt: true } },
+      },
+      take: 500,
+    });
+
+    let totalDelayDays = 0;
+    let delayCount = 0;
+    for (const p of projectsWithFirstQuote) {
+      if (p.quotes.length > 0) {
+        const diff = new Date(p.quotes[0].createdAt) - new Date(p.createdAt);
+        totalDelayDays += diff / (1000 * 60 * 60 * 24);
+        delayCount++;
+      }
+    }
+    const avgDaysToFirstQuote = delayCount > 0 ? Math.round(totalDelayDays / delayCount) : 0;
+
+    // ── Nouveaux inscrits par mois (12 mois) ─────────────────
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
+    twelveMonthsAgo.setDate(1);
+    twelveMonthsAgo.setHours(0, 0, 0, 0);
+
+    const newUsersRaw = await prisma.user.findMany({
+      where: { createdAt: { gte: twelveMonthsAgo } },
+      select: { createdAt: true, role: true },
+    });
+
+    const growthByMonth = {};
+    for (const u of newUsersRaw) {
+      const d = new Date(u.createdAt);
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      if (!growthByMonth[key]) growthByMonth[key] = { clients: 0, professionals: 0 };
+      if (u.role === 'CLIENT') growthByMonth[key].clients++;
+      else if (u.role === 'PROFESSIONAL') growthByMonth[key].professionals++;
+    }
+
+    // ── Taux d'acceptation des devis ─────────────────────────
+    const [totalQuotesSent, quotesAccepted, quotesRefused] = await Promise.all([
+      prisma.quote.count(),
+      prisma.quote.count({ where: { status: 'ACCEPTED' } }),
+      prisma.quote.count({ where: { status: 'REFUSED' } }),
+    ]);
+
+    res.json({
+      funnel: {
+        totalProjects,
+        projectsWithQuote,
+        acceptedQuotes,
+        paidProjects,
+        quoteRate: totalProjects > 0 ? Math.round((projectsWithQuote / totalProjects) * 100) : 0,
+        acceptanceRate: projectsWithQuote > 0 ? Math.round((acceptedQuotes / projectsWithQuote) * 100) : 0,
+        paymentRate: acceptedQuotes > 0 ? Math.round((paidProjects / acceptedQuotes) * 100) : 0,
+        overallConversion: totalProjects > 0 ? Math.round((paidProjects / totalProjects) * 100) : 0,
+      },
+      quotes: {
+        total: totalQuotesSent,
+        accepted: quotesAccepted,
+        refused: quotesRefused,
+        pending: totalQuotesSent - quotesAccepted - quotesRefused,
+        acceptanceRate: totalQuotesSent > 0 ? Math.round((quotesAccepted / totalQuotesSent) * 100) : 0,
+      },
+      retention: {
+        totalClients,
+        clientsWithProjects,
+        repeatClients,
+        retentionRate: clientsWithProjects > 0 ? Math.round((repeatClients / clientsWithProjects) * 100) : 0,
+      },
+      avgDaysToFirstQuote,
+      tradeStats: tradeRevenue,
+      topPros,
+      cityStats: cityStats.map(c => ({ city: c.city, count: c._count.id })),
+      growthByMonth,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

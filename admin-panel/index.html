@@ -1199,6 +1199,41 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       <div class="pagination" id="dis-pagination"></div>
     </div>
 
+    <!-- MODAL: CRÉER LITIGE (admin) -->
+    <div class="modal-overlay" id="modal-create-dispute" onclick="closeModal('modal-create-dispute')">
+      <div class="modal" onclick="event.stopPropagation()" style="max-width:500px;">
+        <div class="modal-header">
+          <span class="modal-title">⚖️ Ouvrir un litige</span>
+          <button class="modal-close" onclick="closeModal('modal-create-dispute')">✕</button>
+        </div>
+        <div class="modal-body">
+          <div style="background:var(--dark4);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px;">
+            <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">Paiement concerné</div>
+            <div id="cdis-pay-info" style="font-weight:600;font-size:14px;color:var(--text);">--</div>
+          </div>
+          <div style="margin-bottom:14px;">
+            <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:6px;">Raison du litige *</label>
+            <select id="cdis-reason" class="filter-select" style="width:100%;box-sizing:border-box;">
+              <option value="WORK_NOT_DONE">Travaux non réalisés</option>
+              <option value="POOR_QUALITY">Qualité insuffisante</option>
+              <option value="OVERCHARGE">Surfacturation</option>
+              <option value="NO_SHOW">Professionnel absent</option>
+              <option value="DAMAGE">Dommages causés</option>
+              <option value="OTHER">Autre</option>
+            </select>
+          </div>
+          <div style="margin-bottom:20px;">
+            <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:6px;">Description (optionnel)</label>
+            <textarea id="cdis-description" class="filter-input" rows="3" placeholder="Détails signalés par le client..." style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"></textarea>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button class="btn btn-secondary" onclick="closeModal('modal-create-dispute')" style="flex:1;">Annuler</button>
+            <button class="btn btn-danger" onclick="submitCreateDispute()" style="flex:1;">⚖️ Ouvrir le litige</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- MODAL: LITIGE DÉTAIL -->
     <div class="modal-overlay" id="modal-dispute" onclick="closeModal('modal-dispute')">
       <div class="modal" onclick="event.stopPropagation()" style="max-width:700px;">
@@ -3620,7 +3655,10 @@ async function loadPayments(page) {
         : '-';
       const projectTitle = pay.quote && pay.quote.project ? pay.quote.project.title : '-';
 
-      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(pay.id) + '" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + escAttr(pay.id) + '\');showToast(\'ID copié\')">' + escHtml(pay.id.substring(0, 6)) + '</span></td><td style="color:var(--orange);font-weight:600">' + formatNumber(pay.amount) + ' FCFA</td><td>' + typeBadge + '</td><td>' + statusBadge + '</td><td>' + escHtml(proName) + '</td><td>' + escHtml(projectTitle) + '</td><td>' + formatDate(pay.createdAt) + '</td><td class="td-actions"><button class="btn btn-view" onclick="viewPaymentAuditLog(\'' + escAttr(pay.id) + '\')" title="Journal audit">📜</button></td></tr>';
+      const disputeBtn = pay.status === 'succeeded'
+        ? '<button class="btn btn-danger" onclick="openCreateDisputeModal(\'' + escAttr(pay.id) + '\',' + formatNumber(pay.amount) + ',\'' + escAttr(proName) + '\',\'' + escAttr(projectTitle) + '\')" title="Ouvrir un litige" style="padding:4px 8px;font-size:12px;">⚖️</button>'
+        : '';
+      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(pay.id) + '" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + escAttr(pay.id) + '\');showToast(\'ID copié\')">' + escHtml(pay.id.substring(0, 6)) + '</span></td><td style="color:var(--orange);font-weight:600">' + formatNumber(pay.amount) + ' FCFA</td><td>' + typeBadge + '</td><td>' + statusBadge + '</td><td>' + escHtml(proName) + '</td><td>' + escHtml(projectTitle) + '</td><td>' + formatDate(pay.createdAt) + '</td><td class="td-actions"><button class="btn btn-view" onclick="viewPaymentAuditLog(\'' + escAttr(pay.id) + '\')" title="Journal audit">📜</button>' + disputeBtn + '</td></tr>';
     }).join('');
 
     // Pagination
@@ -4322,6 +4360,38 @@ async function viewPaymentAuditLog(paymentId) {
     document.getElementById('modal-project').classList.add('show');
   } catch (err) {
     showToast('Erreur: ' + err.message, true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// CRÉER LITIGE (depuis paiements)
+// ══════════════════════════════════════════════════════════════
+let _cDisPaymentId = null;
+
+function openCreateDisputeModal(paymentId, amount, proName, projectTitle) {
+  _cDisPaymentId = paymentId;
+  document.getElementById('cdis-pay-info').textContent =
+    formatNumber(amount) + ' FCFA — ' + proName + ' — ' + projectTitle;
+  document.getElementById('cdis-reason').value = 'WORK_NOT_DONE';
+  document.getElementById('cdis-description').value = '';
+  document.getElementById('modal-create-dispute').classList.add('show');
+}
+
+async function submitCreateDispute() {
+  if (!_cDisPaymentId) return;
+  const reason      = document.getElementById('cdis-reason').value;
+  const description = document.getElementById('cdis-description').value.trim();
+  try {
+    await apiCall('/admin/disputes', {
+      method: 'POST',
+      body: JSON.stringify({ paymentId: _cDisPaymentId, reason, description: description || undefined }),
+    });
+    closeModal('modal-create-dispute');
+    showToast('Litige ouvert avec succès');
+    // Rafraîchir la page litiges si elle est active
+    if (currentPage === 'disputes') { loadDisputeStats(); loadDisputes(1); }
+  } catch (err) {
+    showToast('Erreur : ' + err.message, true);
   }
 }
 

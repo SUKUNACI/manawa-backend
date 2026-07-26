@@ -2447,6 +2447,37 @@ router.get('/disputes/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/admin/disputes — créer un litige manuellement (signalement téléphone/email)
+router.post('/disputes', async (req, res, next) => {
+  try {
+    const { paymentId, reason, description } = req.body;
+    if (!paymentId || !reason) return res.status(400).json({ error: 'paymentId et reason sont requis' });
+
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { quote: { include: { project: { select: { clientId: true } } } } },
+    });
+    if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
+    if (payment.status !== 'succeeded') return res.status(400).json({ error: 'Seul un paiement confirmé peut faire l\'objet d\'un litige' });
+
+    const existing = await prisma.dispute.findFirst({
+      where: { paymentId, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
+    });
+    if (existing) return res.status(409).json({ error: 'Un litige ouvert existe déjà sur ce paiement' });
+
+    const dispute = await prisma.dispute.create({
+      data: {
+        paymentId,
+        clientId: payment.quote.project.clientId,
+        reason,
+        description: description || null,
+        status: 'OPEN',
+      },
+    });
+    res.status(201).json(dispute);
+  } catch (err) { next(err); }
+});
+
 // PATCH /api/admin/disputes/:id/status — changer le statut (OPEN → UNDER_REVIEW…)
 router.patch('/disputes/:id/status', async (req, res, next) => {
   try {

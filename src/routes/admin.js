@@ -1003,6 +1003,73 @@ router.get('/payments/:id', async (req, res, next) => {
   }
 });
 
+// GET /api/admin/payments/:id/audit-logs — journal d'audit d'un paiement
+router.get('/payments/:id/audit-logs', async (req, res, next) => {
+  try {
+    const logs = await prisma.paymentAuditLog.findMany({
+      where: { paymentId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ logs });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/audit-logs — journal global (tous paiements, paginé)
+router.get('/audit-logs', async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 30));
+    const skip = (page - 1) * limit;
+    const { triggeredBy, reason } = req.query;
+
+    const where = {};
+    if (triggeredBy) where.triggeredBy = triggeredBy;
+    if (reason) where.reason = { contains: reason, mode: 'insensitive' };
+
+    const [logs, total] = await Promise.all([
+      prisma.paymentAuditLog.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          payment: {
+            select: {
+              id: true,
+              amount: true,
+              isDeposit: true,
+              geniuspayRef: true,
+              quote: {
+                select: {
+                  project: { select: { title: true } },
+                  professional: {
+                    select: { user: { select: { firstName: true, lastName: true } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      prisma.paymentAuditLog.count({ where }),
+    ]);
+
+    res.json({
+      logs,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ============================================================
 // 6. SUPPORT / TICKETS
 // ============================================================

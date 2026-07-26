@@ -21,6 +21,31 @@ router.get('/me', async (req, res) => {
   res.json(user || {});
 });
 
+// POST /api/admin/create-admin — créer un compte administrateur
+// Réservé à l'admin connecté, protégé par requireAuth + requireRole('ADMIN') ci-dessus
+router.post('/create-admin', async (req, res, next) => {
+  try {
+    const { email, password, firstName, lastName } = req.body;
+    if (!email || !password || !firstName || !lastName) {
+      return res.status(400).json({ error: 'Tous les champs sont requis' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 8 caractères' });
+    }
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) return res.status(409).json({ error: 'Cet email est déjà utilisé' });
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const admin = await prisma.user.create({
+      data: { email, passwordHash, firstName, lastName, role: 'ADMIN' },
+    });
+    const { passwordHash: _, ...safe } = admin;
+    res.status(201).json(safe);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ============================================================
 // 1. TABLEAU DE BORD
 // ============================================================

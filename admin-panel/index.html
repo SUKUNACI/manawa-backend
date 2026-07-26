@@ -247,6 +247,8 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   </div>
   <div class="nav-item" onclick="showPage('settings',this)"><span class="ni">⚙️</span> Paramètres</div>
   <div class="nav-item" onclick="showPage('deleted',this)"><span class="ni">🗄️</span> Corbeille</div>
+  <div class="nav-section">Super Admin</div>
+  <div class="nav-item" onclick="showPage('create-admin',this)"><span class="ni">🔐</span> Créer un admin</div>
 
   <div class="sidebar-footer">
     <div class="admin-chip">
@@ -2291,6 +2293,36 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   </div>
 </div>
 
+<!-- ══ PAGE: CRÉER UN ADMIN ══ -->
+<div class="page" id="page-create-admin">
+  <div style="max-width:480px;margin:0 auto;">
+    <div class="chart-card">
+      <div class="chart-title">🔐 Créer un compte administrateur</div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Cette action est irréversible. Le compte créé aura un accès complet au back-office.</p>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;letter-spacing:.5px;text-transform:uppercase;">Prénom</label>
+          <input type="text" id="new-admin-firstname" class="filter-input" style="width:100%;" placeholder="Prénom">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;letter-spacing:.5px;text-transform:uppercase;">Nom</label>
+          <input type="text" id="new-admin-lastname" class="filter-input" style="width:100%;" placeholder="Nom">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;letter-spacing:.5px;text-transform:uppercase;">Email</label>
+          <input type="email" id="new-admin-email" class="filter-input" style="width:100%;" placeholder="email@domaine.com">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;letter-spacing:.5px;text-transform:uppercase;">Mot de passe (min. 8 caractères)</label>
+          <input type="password" id="new-admin-password" class="filter-input" style="width:100%;" placeholder="Mot de passe">
+        </div>
+        <div id="create-admin-error" style="display:none;background:var(--red-dim);border:1px solid rgba(239,68,68,.25);color:var(--red);padding:10px 14px;border-radius:10px;font-size:12px;"></div>
+        <button class="btn btn-approve" id="create-admin-btn" onclick="submitCreateAdmin()" style="margin-top:4px;">Créer le compte administrateur</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ══ TOAST ══ -->
 <div class="toast" id="toast"><span style="font-size:20px;" id="toast-icon">✅</span><p id="toast-msg">Action réalisée</p></div>
 
@@ -2334,7 +2366,8 @@ const titles = {
   messaging: 'Messagerie',
   settings: 'Configuration & Paramètres',
   support: 'Support',
-  deleted: 'Comptes supprimés'
+  deleted: 'Comptes supprimés',
+  'create-admin': 'Créer un administrateur',
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -2428,6 +2461,7 @@ function showPage(id, el) {
     case 'settings': loadSettings(); break;
     case 'support': loadSupportStats(); loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
+    case 'create-admin': resetCreateAdminForm(); break;
   }
 
   // Bouton Export CSV — visible sur pros, clients, paiements, finances
@@ -5913,6 +5947,51 @@ async function reviewModalDelete() {
     loadReviews(revCurrentPage);
   } catch (err) {
     showToast('Erreur: ' + err.message, true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// CRÉER UN ADMIN
+// ══════════════════════════════════════════════════════════════
+function resetCreateAdminForm() {
+  ['new-admin-firstname','new-admin-lastname','new-admin-email','new-admin-password'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  const err = document.getElementById('create-admin-error');
+  err.style.display = 'none';
+  document.getElementById('create-admin-btn').disabled = false;
+}
+
+async function submitCreateAdmin() {
+  const firstName = document.getElementById('new-admin-firstname').value.trim();
+  const lastName  = document.getElementById('new-admin-lastname').value.trim();
+  const email     = document.getElementById('new-admin-email').value.trim();
+  const password  = document.getElementById('new-admin-password').value;
+  const errEl     = document.getElementById('create-admin-error');
+  const btn       = document.getElementById('create-admin-btn');
+
+  errEl.style.display = 'none';
+  if (!firstName || !lastName || !email || !password) {
+    errEl.textContent = 'Tous les champs sont requis';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Création en cours...';
+  try {
+    await apiCall('/admin/create-admin', {
+      method: 'POST',
+      body: JSON.stringify({ firstName, lastName, email, password }),
+    });
+    showToast('Compte administrateur créé avec succès');
+    resetCreateAdminForm();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Créer le compte administrateur';
   }
 }
 

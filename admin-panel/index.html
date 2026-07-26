@@ -264,6 +264,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   <div class="nav-item" onclick="showPage('companies',this)"><span class="ni">🏢</span> Entreprises</div>
   <div class="nav-item" onclick="showPage('portfolio',this)"><span class="ni">🖼️</span> Portfolios & Réalisations</div>
   <div class="nav-item" onclick="showPage('promos',this)"><span class="ni">🎁</span> Codes Promo & Offres</div>
+  <div class="nav-item" onclick="showPage('quotes-admin',this)"><span class="ni">📄</span> Devis</div>
   <div class="nav-item" onclick="showPage('push',this)"><span class="ni">🔔</span> Notifications Push</div>
   <div class="nav-item" onclick="showPage('communication',this)"><span class="ni">📡</span> Communication</div>
   <div class="nav-item" onclick="showPage('support',this)">
@@ -1511,6 +1512,64 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     </div>
 
     <!-- ══ PAGE: COMPTES SUPPRIMÉS ══ -->
+    <!-- ══ PAGE: DEVIS ══ -->
+    <div class="page" id="page-quotes-admin">
+
+      <div class="kpi-grid">
+        <div class="kpi orange"><div class="kpi-icon">📄</div><div class="kpi-val" id="qa-kpi-total">--</div><div class="kpi-label">Devis total</div></div>
+        <div class="kpi green"><div class="kpi-icon">✅</div><div class="kpi-val" id="qa-kpi-accepted">--</div><div class="kpi-label">Acceptés</div><div class="kpi-delta up" id="qa-kpi-rate"></div></div>
+        <div class="kpi blue"><div class="kpi-icon">⏳</div><div class="kpi-val" id="qa-kpi-pending">--</div><div class="kpi-label">En attente</div></div>
+        <div class="kpi red"><div class="kpi-icon">💰</div><div class="kpi-val" id="qa-kpi-amount">--</div><div class="kpi-label">Montant total devisé</div></div>
+      </div>
+
+      <div class="chart-row" style="margin-bottom:24px;">
+        <div class="chart-card">
+          <h3>📊 Répartition par statut</h3>
+          <div id="qa-status-bars" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;"></div>
+        </div>
+        <div class="chart-card">
+          <h3>📋 Mode de devis</h3>
+          <div id="qa-mode-bars" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <div class="filters">
+        <input class="filter-input" placeholder="🔍 Pro, client, projet…" id="qa-search" oninput="debounceQuotes()">
+        <select class="filter-select" id="qa-status-filter" onchange="loadQuotes(1)">
+          <option value="">Tous les statuts</option>
+          <option value="PENDING">En attente</option>
+          <option value="ACCEPTED">Accepté</option>
+          <option value="REFUSED">Refusé</option>
+          <option value="EXPIRED">Expiré</option>
+          <option value="REVISED">Révisé</option>
+        </select>
+        <select class="filter-select" id="qa-mode-filter" onchange="loadQuotes(1)">
+          <option value="">Tous les modes</option>
+          <option value="SIMPLE">Simple</option>
+          <option value="DETAILED">Détaillé</option>
+        </select>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Professionnel</th><th>Client</th><th>Projet</th>
+            <th>Montant</th><th>Mode</th><th>Statut</th>
+            <th>Paiement</th><th>Créé le</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="qa-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="qa-empty" style="display:none;">
+        <div class="es-icon">📄</div><p>Aucun devis trouvé</p>
+      </div>
+      <div class="pagination" id="qa-pagination" style="display:none;">
+        <button class="btn btn-view" id="qa-prev" onclick="loadQuotes(qaCurrentPage-1)">← Précédent</button>
+        <span class="page-info" id="qa-page-info"></span>
+        <button class="btn btn-view" id="qa-next" onclick="loadQuotes(qaCurrentPage+1)">Suivant →</button>
+      </div>
+    </div>
+
     <!-- ══ PAGE: NOTIFICATIONS PUSH ══ -->
     <div class="page" id="page-push">
 
@@ -1832,6 +1891,74 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   </div>
 </div>
 
+<!-- ══ MODAL: DÉTAIL DEVIS ══ -->
+<div class="modal-overlay" id="modal-quote-detail">
+  <div class="modal" style="width:780px;max-height:90vh;overflow-y:auto;">
+
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+      <div>
+        <h2 id="qd-title" style="margin-bottom:4px;"></h2>
+        <p id="qd-meta" style="margin:0;font-size:13px;color:var(--muted);"></p>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0;">
+        <button class="btn btn-reject" id="qd-cancel-btn" onclick="cancelQuote()" style="display:none;">⛔ Expirer</button>
+        <a id="qd-pdf-btn" href="#" target="_blank" class="btn btn-view" style="display:none;">📥 PDF</a>
+        <button class="btn btn-view" onclick="closeModal('modal-quote-detail')">✕ Fermer</button>
+      </div>
+    </div>
+
+    <!-- Parties -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;" id="qd-parties"></div>
+
+    <!-- Projet -->
+    <div id="qd-project-card" style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:20px;"></div>
+
+    <!-- Lignes de devis -->
+    <div class="section-header" style="margin-bottom:10px;">
+      <h2 style="font-size:15px;">📋 Lignes du devis</h2>
+      <span id="qd-mode-badge"></span>
+    </div>
+    <div class="table-wrap" style="margin-bottom:20px;">
+      <table>
+        <thead><tr><th>Catégorie</th><th>Désignation</th><th>Qté</th><th>Unité</th><th>P.U.</th><th>Total</th></tr></thead>
+        <tbody id="qd-items-tbody"></tbody>
+        <tfoot id="qd-items-total"></tfoot>
+      </table>
+    </div>
+    <div class="empty-state" id="qd-items-empty" style="display:none;padding:20px;">
+      <p style="font-size:13px;">Devis simple — montant global sans lignes détaillées</p>
+    </div>
+
+    <!-- Paiements liés -->
+    <div id="qd-payments-section" style="display:none;">
+      <div class="section-header" style="margin-bottom:10px;">
+        <h2 style="font-size:15px;">💳 Paiements liés</h2>
+      </div>
+      <div class="table-wrap" style="margin-bottom:20px;">
+        <table>
+          <thead><tr><th>Type</th><th>Montant</th><th>Statut</th><th>Méthode</th><th>Date</th></tr></thead>
+          <tbody id="qd-payments-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Historique révisions -->
+    <div id="qd-revisions-section" style="display:none;">
+      <div class="section-header" style="margin-bottom:10px;">
+        <h2 style="font-size:15px;">🔄 Historique des révisions</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Version</th><th>Montant</th><th>Statut</th><th>Description</th><th>Date</th><th></th></tr></thead>
+          <tbody id="qd-revisions-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <!-- ══ MODAL: ENVOYER NOTIFICATION CIBLÉE ══ -->
 <div class="modal-overlay" id="modal-send-push">
   <div class="modal" style="width:520px;">
@@ -2050,6 +2177,7 @@ const titles = {
   companies: 'Gestion des entreprises',
   portfolio: 'Portfolios & Réalisations',
   promos: 'Codes Promo & Offres',
+  'quotes-admin': 'Gestion des devis',
   push: 'Notifications Push',
   settings: 'Configuration & Paramètres',
   support: 'Support',
@@ -2203,6 +2331,7 @@ function showPage(id, el) {
     case 'companies': loadCompanyStats(); loadCompanies(1); break;
     case 'portfolio': loadPortfolioStats(); loadPortfolioProjects(1); break;
     case 'promos': loadPromoStats(); loadPromos(1); break;
+    case 'quotes-admin': loadQuoteStats(); loadQuotes(1); break;
     case 'push': loadPushStats(); loadPushTokens(1); break;
     case 'settings': loadSettings(); break;
     case 'support': loadSupportTickets(); break;
@@ -5446,6 +5575,329 @@ async function reviewModalDelete() {
     loadReviewStats();
   }
 })();
+
+// ══════════════════════════════════════════════════════════════
+// GESTION DES DEVIS
+// ══════════════════════════════════════════════════════════════
+let qaCurrentPage = 1;
+let qaSearchTimer = null;
+let _currentQuoteId = null;
+
+const QA_STATUS_COLORS = {
+  PENDING:  { badge: 'badge-yellow', label: '⏳ En attente' },
+  ACCEPTED: { badge: 'badge-green',  label: '✅ Accepté'    },
+  REFUSED:  { badge: 'badge-red',    label: '✕ Refusé'     },
+  EXPIRED:  { badge: 'badge-muted',  label: '⏰ Expiré'    },
+  REVISED:  { badge: 'badge-blue',   label: '🔄 Révisé'    },
+};
+
+async function loadQuoteStats() {
+  try {
+    const s = await apiCall('/admin/quotes/stats');
+
+    document.getElementById('qa-kpi-total').textContent    = s.total ?? '--';
+    document.getElementById('qa-kpi-accepted').textContent = s.accepted ?? '--';
+    document.getElementById('qa-kpi-rate').textContent     = 'Taux d\'acceptation : ' + (s.acceptRate ?? '--') + '%';
+    document.getElementById('qa-kpi-pending').textContent  = s.pending ?? '--';
+
+    const amt = s.totalAmount || 0;
+    document.getElementById('qa-kpi-amount').textContent =
+      amt >= 1_000_000 ? (amt / 1_000_000).toFixed(1) + ' M FCFA'
+      : amt >= 1_000   ? (amt / 1_000).toFixed(0)     + ' k FCFA'
+      : amt + ' FCFA';
+
+    // Barres statuts
+    const statusBars = document.getElementById('qa-status-bars');
+    const statuses = [
+      { key: 'PENDING',  label: 'En attente', color: 'var(--yellow)', val: s.pending },
+      { key: 'ACCEPTED', label: 'Acceptés',   color: 'var(--green)',  val: s.accepted },
+      { key: 'REFUSED',  label: 'Refusés',    color: 'var(--red)',    val: s.refused },
+      { key: 'EXPIRED',  label: 'Expirés',    color: 'var(--muted)',  val: s.expired },
+      { key: 'REVISED',  label: 'Révisés',    color: 'var(--blue)',   val: s.revised },
+    ];
+    statusBars.innerHTML = statuses.map(st => {
+      const pct = s.total > 0 ? Math.round((st.val / s.total) * 100) : 0;
+      return `<div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+          <span style="color:var(--light);">${st.label}</span>
+          <span style="color:var(--muted);">${st.val} (${pct}%)</span>
+        </div>
+        <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;">
+          <div style="height:100%;width:${pct}%;background:${st.color};border-radius:3px;transition:width .5s;"></div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Barres mode
+    const modeBars = document.getElementById('qa-mode-bars');
+    modeBars.innerHTML = (s.byMode || []).map(m => {
+      const pct = s.total > 0 ? Math.round((m.count / s.total) * 100) : 0;
+      const color = m.mode === 'DETAILED' ? 'var(--orange)' : 'var(--blue)';
+      return `<div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+          <span style="color:var(--light);">${m.mode === 'DETAILED' ? '📋 Détaillé' : '📄 Simple'}</span>
+          <span style="color:var(--muted);">${m.count} (${pct}%)</span>
+        </div>
+        <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;">
+          <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width .5s;"></div>
+        </div>
+      </div>`;
+    }).join('');
+
+  } catch(e) {}
+}
+
+async function loadQuotes(page) {
+  page = Math.max(1, page || 1);
+  const search = document.getElementById('qa-search').value.trim();
+  const status = document.getElementById('qa-status-filter').value;
+  const mode   = document.getElementById('qa-mode-filter').value;
+  const tbody  = document.getElementById('qa-tbody');
+  const empty  = document.getElementById('qa-empty');
+  const pag    = document.getElementById('qa-pagination');
+  tbody.innerHTML = '<tr><td colspan="9"><div class="loading-spinner"></div></td></tr>';
+
+  try {
+    let url = '/admin/quotes?page=' + page;
+    if (search) url += '&search=' + encodeURIComponent(search);
+    if (status) url += '&status=' + status;
+    if (mode)   url += '&mode='   + mode;
+
+    const data = await apiCall(url);
+    qaCurrentPage = data.page;
+    tbody.innerHTML = '';
+
+    if (!data.quotes || data.quotes.length === 0) {
+      empty.style.display = '';
+      pag.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+
+    data.quotes.forEach(q => {
+      const proName = q.professional
+        ? (q.professional.companyName || q.professional.user.firstName + ' ' + q.professional.user.lastName)
+        : '—';
+      const clientName = q.project?.client
+        ? q.project.client.firstName + ' ' + q.project.client.lastName
+        : '—';
+
+      const st = QA_STATUS_COLORS[q.status] || { badge: 'badge-muted', label: q.status };
+      const modeBadge = q.mode === 'DETAILED'
+        ? '<span class="badge badge-orange" style="font-size:10px;">Détaillé</span>'
+        : '<span class="badge badge-blue"   style="font-size:10px;">Simple</span>';
+      const vBadge = q.version > 1 ? `<span class="badge badge-muted" style="font-size:9px;margin-left:4px;">v${q.version}</span>` : '';
+
+      // Paiement le plus avancé
+      let payBadge = '<span style="font-size:11px;color:var(--muted);">—</span>';
+      if (q.payments && q.payments.length > 0) {
+        const paid = q.payments.find(p => p.status === 'succeeded');
+        const pend = q.payments.find(p => p.status === 'pending');
+        if (paid)      payBadge = '<span class="badge badge-green"  style="font-size:10px;">✓ Payé</span>';
+        else if (pend) payBadge = '<span class="badge badge-yellow" style="font-size:10px;">⏳ En attente</span>';
+        else           payBadge = '<span class="badge badge-red"    style="font-size:10px;">✕ Échoué</span>';
+      }
+
+      tbody.innerHTML += `<tr>
+        <td>
+          <strong>${escHtml(proName)}</strong><br>
+          <span style="font-size:11px;color:var(--muted);">${escHtml(q.professional?.trade || '')}</span>
+        </td>
+        <td>
+          <strong>${escHtml(clientName)}</strong><br>
+          <span style="font-size:11px;color:var(--muted);">${escHtml(q.project?.client?.email || '')}</span>
+        </td>
+        <td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          ${escHtml(q.project?.title || '—')}<br>
+          <span style="font-size:11px;color:var(--muted);">${escHtml(q.project?.city || '')}</span>
+        </td>
+        <td style="font-weight:700;color:var(--white);white-space:nowrap;">
+          ${(q.amount || 0).toLocaleString('fr-FR')} FCFA${vBadge}
+        </td>
+        <td>${modeBadge}</td>
+        <td><span class="badge ${st.badge}">${st.label}</span></td>
+        <td>${payBadge}</td>
+        <td style="font-size:11px;color:var(--muted);">${new Date(q.createdAt).toLocaleDateString('fr-FR')}</td>
+        <td class="td-actions">
+          <button class="btn btn-view" onclick="openQuoteDetail('${q.id}')">🔍 Voir</button>
+        </td>
+      </tr>`;
+    });
+
+    pag.style.display = data.pages > 1 ? 'flex' : 'none';
+    document.getElementById('qa-page-info').textContent = 'Page ' + data.page + ' / ' + data.pages + ' — ' + data.total + ' devis';
+    document.getElementById('qa-prev').disabled = data.page <= 1;
+    document.getElementById('qa-next').disabled = data.page >= data.pages;
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--red);">Erreur de chargement</td></tr>';
+  }
+}
+
+function debounceQuotes() {
+  clearTimeout(qaSearchTimer);
+  qaSearchTimer = setTimeout(() => loadQuotes(1), 350);
+}
+
+async function openQuoteDetail(quoteId) {
+  _currentQuoteId = quoteId;
+  document.getElementById('modal-quote-detail').classList.add('show');
+  document.getElementById('qd-title').textContent = 'Chargement…';
+  document.getElementById('qd-meta').textContent  = '';
+  document.getElementById('qd-parties').innerHTML = '<div class="loading-spinner"></div>';
+  document.getElementById('qd-project-card').innerHTML = '';
+  document.getElementById('qd-items-tbody').innerHTML  = '';
+  document.getElementById('qd-items-total').innerHTML  = '';
+  document.getElementById('qd-items-empty').style.display = 'none';
+  document.getElementById('qd-payments-section').style.display   = 'none';
+  document.getElementById('qd-revisions-section').style.display  = 'none';
+  document.getElementById('qd-cancel-btn').style.display = 'none';
+  document.getElementById('qd-pdf-btn').style.display    = 'none';
+
+  try {
+    const q = await apiCall('/admin/quotes/' + quoteId);
+
+    const st = QA_STATUS_COLORS[q.status] || { badge: 'badge-muted', label: q.status };
+    const proName = q.professional
+      ? (q.professional.companyName || q.professional.user.firstName + ' ' + q.professional.user.lastName)
+      : '—';
+
+    document.getElementById('qd-title').textContent =
+      '📄 Devis — ' + proName + (q.version > 1 ? ' (v' + q.version + ')' : '');
+    document.getElementById('qd-meta').innerHTML =
+      `<span class="badge ${st.badge}">${st.label}</span>` +
+      ` &nbsp;•&nbsp; ${new Date(q.createdAt).toLocaleDateString('fr-FR')}` +
+      (q.expiresAt ? ` &nbsp;•&nbsp; Expire le ${new Date(q.expiresAt).toLocaleDateString('fr-FR')}` : '');
+
+    // Bouton expirer
+    if (['PENDING', 'REVISED'].includes(q.status)) {
+      document.getElementById('qd-cancel-btn').style.display = '';
+    }
+    // Bouton PDF
+    if (q.pdfUrl) {
+      const pdfBtn = document.getElementById('qd-pdf-btn');
+      pdfBtn.href = q.pdfUrl;
+      pdfBtn.style.display = '';
+    }
+
+    // Parties : pro + client
+    const pro = q.professional || {};
+    const client = q.project?.client || {};
+    document.getElementById('qd-parties').innerHTML = `
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;letter-spacing:1px;">PROFESSIONNEL</div>
+        <div style="font-weight:700;font-size:15px;margin-bottom:2px;">${escHtml(proName)}</div>
+        <div style="font-size:12px;color:var(--muted);">${escHtml(pro.trade || '')}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px;">${escHtml(pro.user?.email || '')}</div>
+        <div style="font-size:12px;color:var(--muted);">${escHtml(pro.user?.phone || '')}</div>
+        ${pro.averageRating > 0 ? `<div style="font-size:12px;color:var(--gold);margin-top:4px;">⭐ ${pro.averageRating.toFixed(1)}</div>` : ''}
+      </div>
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;letter-spacing:1px;">CLIENT</div>
+        <div style="font-weight:700;font-size:15px;margin-bottom:2px;">${escHtml(client.firstName + ' ' + client.lastName)}</div>
+        <div style="font-size:12px;color:var(--muted);">${escHtml(client.email || '')}</div>
+        <div style="font-size:12px;color:var(--muted);">${escHtml(client.phone || '')}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px;">${escHtml(client.city || '')}</div>
+      </div>`;
+
+    // Projet
+    const proj = q.project || {};
+    document.getElementById('qd-project-card').innerHTML = `
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:1px;">PROJET</div>
+      <div style="font-weight:700;font-size:15px;margin-bottom:4px;">${escHtml(proj.title || '—')}</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);">
+        <span>📍 ${escHtml(proj.city || '—')}</span>
+        <span>🔧 ${escHtml(proj.tradeNeeded || '—')}</span>
+        <span>${proj.status ? '● ' + proj.status : ''}</span>
+      </div>
+      ${proj.description ? `<div style="font-size:12px;color:var(--light);margin-top:8px;">${escHtml(proj.description)}</div>` : ''}`;
+
+    // Mode badge
+    document.getElementById('qd-mode-badge').innerHTML = q.mode === 'DETAILED'
+      ? '<span class="badge badge-orange">📋 Détaillé</span>'
+      : '<span class="badge badge-blue">📄 Simple</span>';
+
+    // Lignes
+    if (q.items && q.items.length > 0) {
+      const catLabels = { LABOUR: 'Main-d\'œuvre', MATERIALS: 'Matériaux', OTHER: 'Autre' };
+      const tbody = document.getElementById('qd-items-tbody');
+      tbody.innerHTML = q.items.map(it => `<tr>
+        <td><span class="badge badge-muted" style="font-size:10px;">${catLabels[it.category] || it.category}</span></td>
+        <td>${escHtml(it.label)}</td>
+        <td style="text-align:right;">${it.quantity}</td>
+        <td style="color:var(--muted);">${escHtml(it.unit || '—')}</td>
+        <td style="text-align:right;">${it.unitPrice.toLocaleString('fr-FR')} FCFA</td>
+        <td style="text-align:right;font-weight:700;">${it.total.toLocaleString('fr-FR')} FCFA</td>
+      </tr>`).join('');
+      document.getElementById('qd-items-total').innerHTML = `
+        <tr style="border-top:2px solid var(--border);">
+          <td colspan="5" style="text-align:right;font-weight:600;color:var(--muted);padding:12px 16px;">TOTAL</td>
+          <td style="text-align:right;font-weight:800;font-size:16px;color:var(--orange);padding:12px 16px;">
+            ${q.amount.toLocaleString('fr-FR')} FCFA
+          </td>
+        </tr>`;
+    } else {
+      document.getElementById('qd-items-empty').style.display = '';
+      document.getElementById('qd-items-total').innerHTML = `
+        <tr style="border-top:2px solid var(--border);">
+          <td colspan="5" style="text-align:right;font-weight:600;color:var(--muted);padding:12px 16px;">MONTANT GLOBAL</td>
+          <td style="text-align:right;font-weight:800;font-size:16px;color:var(--orange);padding:12px 16px;">
+            ${q.amount.toLocaleString('fr-FR')} FCFA
+          </td>
+        </tr>`;
+    }
+
+    // Paiements
+    if (q.payments && q.payments.length > 0) {
+      document.getElementById('qd-payments-section').style.display = '';
+      const payColors = { succeeded: 'badge-green', pending: 'badge-yellow', failed: 'badge-red' };
+      document.getElementById('qd-payments-tbody').innerHTML = q.payments.map(p => `<tr>
+        <td>${p.isDeposit ? '🔒 Acompte' : '✅ Solde'}</td>
+        <td style="font-weight:700;">${p.amount.toLocaleString('fr-FR')} FCFA</td>
+        <td><span class="badge ${payColors[p.status] || 'badge-muted'}">${p.status}</span></td>
+        <td style="color:var(--muted);font-size:12px;">${escHtml(p.paymentMethod || '—')}</td>
+        <td style="font-size:11px;color:var(--muted);">${p.completedAt ? new Date(p.completedAt).toLocaleDateString('fr-FR') : '—'}</td>
+      </tr>`).join('');
+    }
+
+    // Révisions
+    const allVersions = [
+      ...(q.parentQuote ? [{ ...q.parentQuote, isCurrent: false }] : []),
+      ...((q.revisions || []).map(r => ({ ...r, isCurrent: r.id === q.id }))),
+    ];
+    if (allVersions.length > 0) {
+      document.getElementById('qd-revisions-section').style.display = '';
+      document.getElementById('qd-revisions-tbody').innerHTML = allVersions.map(r => {
+        const rst = QA_STATUS_COLORS[r.status] || { badge: 'badge-muted', label: r.status };
+        const current = r.isCurrent ? ' style="background:rgba(244,114,11,0.05);"' : '';
+        return `<tr${current}>
+          <td><strong>v${r.version}</strong>${r.isCurrent ? ' <span class="badge badge-orange" style="font-size:9px;">actuel</span>' : ''}</td>
+          <td style="font-weight:700;">${(r.amount || 0).toLocaleString('fr-FR')} FCFA</td>
+          <td><span class="badge ${rst.badge}" style="font-size:10px;">${rst.label}</span></td>
+          <td style="font-size:12px;color:var(--muted);max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(r.description || '—')}</td>
+          <td style="font-size:11px;color:var(--muted);">${new Date(r.createdAt).toLocaleDateString('fr-FR')}</td>
+          <td>${!r.isCurrent ? `<button class="btn btn-view" style="font-size:11px;padding:4px 10px;" onclick="openQuoteDetail('${r.id}')">Voir</button>` : ''}</td>
+        </tr>`;
+      }).join('');
+    }
+
+  } catch(e) {
+    document.getElementById('qd-title').textContent = 'Erreur de chargement';
+  }
+}
+
+async function cancelQuote() {
+  if (!_currentQuoteId) return;
+  if (!confirm('Expirer ce devis ? Il passera au statut EXPIRED.')) return;
+  try {
+    await apiCall('/admin/quotes/' + _currentQuoteId + '/cancel', { method: 'PATCH' });
+    showToast('Devis expiré');
+    closeModal('modal-quote-detail');
+    loadQuotes(qaCurrentPage);
+    loadQuoteStats();
+  } catch(e) {
+    showToast('Erreur : ' + e.message, true);
+  }
+}
 
 // ══════════════════════════════════════════════════════════════
 // NOTIFICATIONS PUSH

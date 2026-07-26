@@ -264,6 +264,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   <div class="nav-item" onclick="showPage('companies',this)"><span class="ni">🏢</span> Entreprises</div>
   <div class="nav-item" onclick="showPage('portfolio',this)"><span class="ni">🖼️</span> Portfolios & Réalisations</div>
   <div class="nav-item" onclick="showPage('promos',this)"><span class="ni">🎁</span> Codes Promo & Offres</div>
+  <div class="nav-item" onclick="showPage('push',this)"><span class="ni">🔔</span> Notifications Push</div>
   <div class="nav-item" onclick="showPage('communication',this)"><span class="ni">📡</span> Communication</div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
@@ -1510,6 +1511,125 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     </div>
 
     <!-- ══ PAGE: COMPTES SUPPRIMÉS ══ -->
+    <!-- ══ PAGE: NOTIFICATIONS PUSH ══ -->
+    <div class="page" id="page-push">
+
+      <!-- KPIs ligne 1 : tokens -->
+      <div class="kpi-grid" id="push-kpis-tokens">
+        <div class="kpi orange">
+          <div class="kpi-icon">📱</div>
+          <div class="kpi-val" id="push-kpi-active">--</div>
+          <div class="kpi-label">Tokens actifs</div>
+          <div class="kpi-delta up" id="push-kpi-delivery"></div>
+        </div>
+        <div class="kpi blue">
+          <div class="kpi-icon">👥</div>
+          <div class="kpi-val" id="push-kpi-coverage">--</div>
+          <div class="kpi-label">Couverture utilisateurs</div>
+        </div>
+        <div class="kpi green">
+          <div class="kpi-icon">🔔</div>
+          <div class="kpi-val" id="push-kpi-notifs30d">--</div>
+          <div class="kpi-label">Notifs envoyées (30j)</div>
+        </div>
+        <div class="kpi red">
+          <div class="kpi-icon">📖</div>
+          <div class="kpi-val" id="push-kpi-readrate">--</div>
+          <div class="kpi-label">Taux de lecture</div>
+        </div>
+      </div>
+
+      <!-- Répartition plateforme + type -->
+      <div class="chart-row" style="margin-bottom:24px;" id="push-platform-row">
+        <div class="chart-card">
+          <h3>📱 Tokens par plateforme</h3>
+          <div id="push-platform-bars" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;"></div>
+        </div>
+        <div class="chart-card">
+          <h3>⚙️ Tokens par type de service</h3>
+          <div id="push-type-bars" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <!-- Tabs : Tokens / Historique -->
+      <div style="display:flex;gap:4px;margin-bottom:20px;background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:4px;width:fit-content;">
+        <button id="push-tab-tokens"  class="btn btn-approve" onclick="switchPushTab('tokens')"  style="padding:8px 20px;border-radius:10px;">📱 Tokens enregistrés</button>
+        <button id="push-tab-history" class="btn btn-view"    onclick="switchPushTab('history')" style="padding:8px 20px;border-radius:10px;">📜 Historique notifs</button>
+      </div>
+
+      <!-- Panel Tokens -->
+      <div id="push-panel-tokens">
+        <div class="section-header">
+          <h2>Tous les tokens push</h2>
+          <div class="sh-actions">
+            <button class="btn btn-approve" onclick="openSendPushModal()">📤 Envoyer une notif ciblée</button>
+          </div>
+        </div>
+        <div class="filters">
+          <input  class="filter-input"  placeholder="🔍 Rechercher un utilisateur…" id="push-tok-search" oninput="debouncePushTokens()">
+          <select class="filter-select" id="push-tok-platform" onchange="loadPushTokens(1)">
+            <option value="">Toutes plateformes</option>
+            <option value="Android">Android</option>
+            <option value="iOS">iOS</option>
+          </select>
+          <select class="filter-select" id="push-tok-type" onchange="loadPushTokens(1)">
+            <option value="">Tous types</option>
+            <option value="FCM">FCM</option>
+            <option value="EXPO">Expo</option>
+            <option value="APNs">APNs</option>
+          </select>
+          <select class="filter-select" id="push-tok-active" onchange="loadPushTokens(1)">
+            <option value="">Tous statuts</option>
+            <option value="true">Actifs</option>
+            <option value="false">Inactifs</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Utilisateur</th><th>Plateforme</th><th>Type</th><th>Device ID</th><th>Dernière utilisation</th><th>Enregistré le</th><th>Statut</th><th>Actions</th></tr></thead>
+            <tbody id="push-tok-tbody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="push-tok-empty" style="display:none;">
+          <div class="es-icon">📱</div>
+          <p>Aucun token trouvé</p>
+        </div>
+        <div class="pagination" id="push-tok-pagination" style="display:none;">
+          <button class="btn btn-view" id="push-tok-prev" onclick="loadPushTokens(pushTokPage-1)">← Précédent</button>
+          <span class="page-info" id="push-tok-page-info"></span>
+          <button class="btn btn-view" id="push-tok-next" onclick="loadPushTokens(pushTokPage+1)">Suivant →</button>
+        </div>
+      </div>
+
+      <!-- Panel Historique -->
+      <div id="push-panel-history" style="display:none;">
+        <div class="filters">
+          <input  class="filter-input"  placeholder="🔍 ID utilisateur…" id="push-hist-user" oninput="debouncePushHistory()">
+          <select class="filter-select" id="push-hist-read" onchange="loadPushHistory(1)">
+            <option value="">Toutes</option>
+            <option value="false">Non lues</option>
+            <option value="true">Lues</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Utilisateur</th><th>Titre</th><th>Message</th><th>Type</th><th>Lue</th><th>Envoyée le</th></tr></thead>
+            <tbody id="push-hist-tbody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="push-hist-empty" style="display:none;">
+          <div class="es-icon">🔔</div>
+          <p>Aucune notification trouvée</p>
+        </div>
+        <div class="pagination" id="push-hist-pagination" style="display:none;">
+          <button class="btn btn-view" id="push-hist-prev" onclick="loadPushHistory(pushHistPage-1)">← Précédent</button>
+          <span class="page-info" id="push-hist-page-info"></span>
+          <button class="btn btn-view" id="push-hist-next" onclick="loadPushHistory(pushHistPage+1)">Suivant →</button>
+        </div>
+      </div>
+
+    </div>
+
     <!-- ══ PAGE: CODES PROMO & OFFRES ══ -->
     <div class="page" id="page-promos">
       <div class="kpi-grid" id="promos-kpis">
@@ -1712,6 +1832,42 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   </div>
 </div>
 
+<!-- ══ MODAL: ENVOYER NOTIFICATION CIBLÉE ══ -->
+<div class="modal-overlay" id="modal-send-push">
+  <div class="modal" style="width:520px;">
+    <h2>📤 Envoyer une notification ciblée</h2>
+    <p style="margin-bottom:20px;">Envoie une notification push + in-app à un utilisateur spécifique.</p>
+
+    <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;">UTILISATEUR *</label>
+    <div style="display:flex;gap:8px;margin-bottom:4px;">
+      <input type="text" id="push-send-user-search" class="filter-input" style="flex:1;" placeholder="Rechercher par nom ou email…" oninput="debouncePushUserSearch()">
+    </div>
+    <div id="push-send-user-results" style="display:none;background:var(--dark3);border:1px solid var(--border);border-radius:12px;margin-bottom:12px;max-height:180px;overflow-y:auto;"></div>
+    <div id="push-send-user-selected" style="display:none;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:12px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--green);"></div>
+    <input type="hidden" id="push-send-user-id">
+
+    <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;margin-top:4px;">TITRE *</label>
+    <input type="text" id="push-send-title" class="filter-input" style="width:100%;margin-bottom:12px;" placeholder="Ex: Nouveau devis reçu">
+
+    <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;">MESSAGE *</label>
+    <textarea id="push-send-body" class="filter-input" style="width:100%;height:80px;resize:none;margin-bottom:12px;" placeholder="Contenu de la notification…"></textarea>
+
+    <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;">TYPE</label>
+    <select id="push-send-type" class="filter-select" style="width:100%;margin-bottom:20px;">
+      <option value="ADMIN">ADMIN — message administrateur</option>
+      <option value="INFO">INFO — information générale</option>
+      <option value="ALERT">ALERT — alerte importante</option>
+    </select>
+
+    <div class="login-error" id="push-send-error" style="display:none;margin-bottom:12px;"></div>
+    <div id="push-send-result" style="display:none;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:var(--green);"></div>
+    <div class="modal-actions">
+      <button class="btn btn-view" onclick="closeModal('modal-send-push')">Fermer</button>
+      <button class="btn btn-approve" id="push-send-btn" onclick="sendTargetedPush()">📤 Envoyer</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ MODAL: CRÉER / ÉDITER CODE PROMO ══ -->
 <div class="modal-overlay" id="modal-promo">
   <div class="modal" style="width:560px;max-height:90vh;overflow-y:auto;">
@@ -1894,6 +2050,7 @@ const titles = {
   companies: 'Gestion des entreprises',
   portfolio: 'Portfolios & Réalisations',
   promos: 'Codes Promo & Offres',
+  push: 'Notifications Push',
   settings: 'Configuration & Paramètres',
   support: 'Support',
   deleted: 'Comptes supprimés'
@@ -2046,6 +2203,7 @@ function showPage(id, el) {
     case 'companies': loadCompanyStats(); loadCompanies(1); break;
     case 'portfolio': loadPortfolioStats(); loadPortfolioProjects(1); break;
     case 'promos': loadPromoStats(); loadPromos(1); break;
+    case 'push': loadPushStats(); loadPushTokens(1); break;
     case 'settings': loadSettings(); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
@@ -5288,6 +5446,315 @@ async function reviewModalDelete() {
     loadReviewStats();
   }
 })();
+
+// ══════════════════════════════════════════════════════════════
+// NOTIFICATIONS PUSH
+// ══════════════════════════════════════════════════════════════
+let pushTokPage = 1, pushHistPage = 1;
+let pushTokTimer = null, pushHistTimer = null, pushUserTimer = null;
+let _pushCurrentTab = 'tokens';
+
+async function loadPushStats() {
+  try {
+    const s = await apiCall('/admin/notifications/stats');
+
+    document.getElementById('push-kpi-active').textContent    = s.tokens.active ?? '--';
+    document.getElementById('push-kpi-delivery').textContent  = 'Taux délivrance : ' + (s.tokens.deliveryRate ?? '--') + '%';
+    document.getElementById('push-kpi-coverage').textContent  = (s.tokens.coverageRate ?? '--') + '%';
+    document.getElementById('push-kpi-notifs30d').textContent = s.notifications.last30d ?? '--';
+    document.getElementById('push-kpi-readrate').textContent  = (s.notifications.readRate ?? '--') + '%';
+
+    // Barres plateforme
+    const platEl = document.getElementById('push-platform-bars');
+    const platTotal = s.tokens.byPlatform.reduce((a, r) => a + r.count, 0) || 1;
+    platEl.innerHTML = s.tokens.byPlatform.length === 0
+      ? '<span style="color:var(--muted);font-size:13px;">Aucun token enregistré</span>'
+      : s.tokens.byPlatform.map(r => {
+          const pct = Math.round((r.count / platTotal) * 100);
+          const color = r.platform === 'iOS' ? 'var(--blue)' : 'var(--green)';
+          return `<div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+              <span style="color:var(--light);">${escHtml(r.platform)}</span>
+              <span style="color:var(--muted);">${r.count} (${pct}%)</span>
+            </div>
+            <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;">
+              <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width .5s;"></div>
+            </div>
+          </div>`;
+        }).join('');
+
+    // Barres type
+    const typeEl = document.getElementById('push-type-bars');
+    const typeTotal = s.tokens.byType.reduce((a, r) => a + r.count, 0) || 1;
+    const typeColors = { FCM: 'var(--orange)', EXPO: 'var(--gold)', APNs: 'var(--blue)' };
+    typeEl.innerHTML = s.tokens.byType.length === 0
+      ? '<span style="color:var(--muted);font-size:13px;">Aucun token enregistré</span>'
+      : s.tokens.byType.map(r => {
+          const pct = Math.round((r.count / typeTotal) * 100);
+          const color = typeColors[r.type] || 'var(--muted)';
+          return `<div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+              <span style="color:var(--light);">${escHtml(r.type)}</span>
+              <span style="color:var(--muted);">${r.count} (${pct}%)</span>
+            </div>
+            <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;">
+              <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width .5s;"></div>
+            </div>
+          </div>`;
+        }).join('');
+  } catch(e) {}
+}
+
+function switchPushTab(tab) {
+  _pushCurrentTab = tab;
+  document.getElementById('push-panel-tokens').style.display  = tab === 'tokens'  ? '' : 'none';
+  document.getElementById('push-panel-history').style.display = tab === 'history' ? '' : 'none';
+  document.getElementById('push-tab-tokens').className  = 'btn ' + (tab === 'tokens'  ? 'btn-approve' : 'btn-view');
+  document.getElementById('push-tab-history').className = 'btn ' + (tab === 'history' ? 'btn-approve' : 'btn-view');
+  if (tab === 'history' && pushHistPage === 1) loadPushHistory(1);
+}
+
+// ─── Tokens ────────────────────────────────────────────────────────────────
+
+async function loadPushTokens(page) {
+  page = Math.max(1, page || 1);
+  const search   = document.getElementById('push-tok-search').value.trim();
+  const platform = document.getElementById('push-tok-platform').value;
+  const type     = document.getElementById('push-tok-type').value;
+  const active   = document.getElementById('push-tok-active').value;
+  const tbody    = document.getElementById('push-tok-tbody');
+  const empty    = document.getElementById('push-tok-empty');
+  const pag      = document.getElementById('push-tok-pagination');
+  tbody.innerHTML = '<tr><td colspan="8"><div class="loading-spinner"></div></td></tr>';
+
+  try {
+    let url = '/admin/notifications/tokens?page=' + page;
+    if (search)   url += '&search='   + encodeURIComponent(search);
+    if (platform) url += '&platform=' + encodeURIComponent(platform);
+    if (type)     url += '&type='     + encodeURIComponent(type);
+    if (active)   url += '&active='   + active;
+
+    const data = await apiCall(url);
+    pushTokPage = data.page;
+    tbody.innerHTML = '';
+
+    if (!data.tokens || data.tokens.length === 0) {
+      empty.style.display = '';
+      pag.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+
+    data.tokens.forEach(t => {
+      const uName  = t.user ? t.user.firstName + ' ' + t.user.lastName : '—';
+      const uRole  = t.user?.role === 'PROFESSIONAL' ? '<span class="badge badge-orange" style="font-size:9px;">PRO</span>' : '<span class="badge badge-blue" style="font-size:9px;">CLIENT</span>';
+      const platIcon = t.platform === 'iOS' ? '🍎' : '🤖';
+      const typeColor = { FCM: 'badge-orange', EXPO: 'badge-yellow', APNs: 'badge-blue' }[t.type] || 'badge-muted';
+      const statusBadge = t.isActive ? '<span class="badge badge-green">● Actif</span>' : '<span class="badge badge-muted">Inactif</span>';
+      const lastUsed = t.lastUsed ? new Date(t.lastUsed).toLocaleDateString('fr-FR') : '—';
+      const shortToken = t.token ? (t.token.substring(0, 18) + '…') : '—';
+
+      tbody.innerHTML += `<tr>
+        <td>
+          <strong>${escHtml(uName)}</strong> ${uRole}<br>
+          <span style="font-size:11px;color:var(--muted);">${escHtml(t.user?.email || '')}</span>
+        </td>
+        <td>${platIcon} ${escHtml(t.platform)}</td>
+        <td><span class="badge ${typeColor}">${escHtml(t.type)}</span></td>
+        <td style="font-size:11px;color:var(--muted);">${escHtml(t.deviceId || '—')}</td>
+        <td style="font-size:12px;">${lastUsed}</td>
+        <td style="font-size:11px;color:var(--muted);">${new Date(t.createdAt).toLocaleDateString('fr-FR')}</td>
+        <td>${statusBadge}</td>
+        <td class="td-actions">
+          ${t.user ? `<button class="btn btn-approve" style="font-size:11px;padding:5px 10px;" onclick="openSendPushModal('${t.user.id}','${escHtml(uName)}')">📤</button>` : ''}
+          ${t.isActive ? `<button class="btn btn-reject" style="font-size:11px;padding:5px 10px;" onclick="invalidateToken('${t.id}')">⛔</button>` : ''}
+        </td>
+      </tr>`;
+    });
+
+    pag.style.display = data.pages > 1 ? 'flex' : 'none';
+    document.getElementById('push-tok-page-info').textContent = 'Page ' + data.page + ' / ' + data.pages + ' — ' + data.total + ' token(s)';
+    document.getElementById('push-tok-prev').disabled = data.page <= 1;
+    document.getElementById('push-tok-next').disabled = data.page >= data.pages;
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--red);">Erreur de chargement</td></tr>';
+  }
+}
+
+function debouncePushTokens() {
+  clearTimeout(pushTokTimer);
+  pushTokTimer = setTimeout(() => loadPushTokens(1), 350);
+}
+
+async function invalidateToken(tokenId) {
+  if (!confirm('Invalider ce token ? L\'appareil ne recevra plus de notifications.')) return;
+  try {
+    await apiCall('/admin/notifications/tokens/' + tokenId, { method: 'DELETE' });
+    showToast('Token invalidé');
+    loadPushTokens(pushTokPage);
+    loadPushStats();
+  } catch(e) {
+    showToast('Erreur : ' + e.message, true);
+  }
+}
+
+// ─── Historique ────────────────────────────────────────────────────────────
+
+async function loadPushHistory(page) {
+  page = Math.max(1, page || 1);
+  const userId = document.getElementById('push-hist-user').value.trim();
+  const read   = document.getElementById('push-hist-read').value;
+  const tbody  = document.getElementById('push-hist-tbody');
+  const empty  = document.getElementById('push-hist-empty');
+  const pag    = document.getElementById('push-hist-pagination');
+  tbody.innerHTML = '<tr><td colspan="6"><div class="loading-spinner"></div></td></tr>';
+
+  try {
+    let url = '/admin/notifications/history?page=' + page;
+    if (userId) url += '&userId=' + encodeURIComponent(userId);
+    if (read)   url += '&read='   + read;
+
+    const data = await apiCall(url);
+    pushHistPage = data.page;
+    tbody.innerHTML = '';
+
+    if (!data.notifications || data.notifications.length === 0) {
+      empty.style.display = '';
+      pag.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+
+    data.notifications.forEach(n => {
+      const uName = n.user ? n.user.firstName + ' ' + n.user.lastName : '—';
+      const readBadge = n.read
+        ? '<span class="badge badge-green" style="font-size:10px;">✓ Lue</span>'
+        : '<span class="badge badge-yellow" style="font-size:10px;">● Non lue</span>';
+      const typeBadge = n.type ? `<span class="badge badge-muted" style="font-size:10px;">${escHtml(n.type)}</span>` : '';
+
+      tbody.innerHTML += `<tr>
+        <td>
+          <strong>${escHtml(uName)}</strong><br>
+          <span style="font-size:11px;color:var(--muted);">${escHtml(n.user?.email || '')}</span>
+        </td>
+        <td><strong style="color:var(--white);">${escHtml(n.title || '—')}</strong></td>
+        <td style="font-size:12px;color:var(--muted);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(n.body || n.message || '—')}</td>
+        <td>${typeBadge}</td>
+        <td>${readBadge}</td>
+        <td style="font-size:11px;color:var(--muted);">${new Date(n.createdAt).toLocaleDateString('fr-FR')}</td>
+      </tr>`;
+    });
+
+    pag.style.display = data.pages > 1 ? 'flex' : 'none';
+    document.getElementById('push-hist-page-info').textContent = 'Page ' + data.page + ' / ' + data.pages + ' — ' + data.total + ' notif(s)';
+    document.getElementById('push-hist-prev').disabled = data.page <= 1;
+    document.getElementById('push-hist-next').disabled = data.page >= data.pages;
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--red);">Erreur de chargement</td></tr>';
+  }
+}
+
+function debouncePushHistory() {
+  clearTimeout(pushHistTimer);
+  pushHistTimer = setTimeout(() => loadPushHistory(1), 400);
+}
+
+// ─── Envoi ciblé ───────────────────────────────────────────────────────────
+
+function openSendPushModal(userId, userName) {
+  document.getElementById('push-send-user-id').value     = userId || '';
+  document.getElementById('push-send-user-search').value = userName || '';
+  document.getElementById('push-send-user-results').style.display = 'none';
+  document.getElementById('push-send-user-selected').style.display = userId ? '' : 'none';
+  document.getElementById('push-send-user-selected').textContent  = userId ? ('✓ ' + userName) : '';
+  document.getElementById('push-send-title').value  = '';
+  document.getElementById('push-send-body').value   = '';
+  document.getElementById('push-send-type').value   = 'ADMIN';
+  document.getElementById('push-send-error').style.display  = 'none';
+  document.getElementById('push-send-result').style.display = 'none';
+  document.getElementById('push-send-btn').disabled = false;
+  document.getElementById('push-send-btn').textContent = '📤 Envoyer';
+  document.getElementById('modal-send-push').classList.add('show');
+}
+
+let _pushUserSearchTimer = null;
+function debouncePushUserSearch() {
+  clearTimeout(_pushUserSearchTimer);
+  const q = document.getElementById('push-send-user-search').value.trim();
+  if (q.length < 2) { document.getElementById('push-send-user-results').style.display = 'none'; return; }
+  _pushUserSearchTimer = setTimeout(async () => {
+    try {
+      const res = await apiCall('/admin/professionals?search=' + encodeURIComponent(q) + '&limit=5');
+      const clients = await apiCall('/admin/users?search=' + encodeURIComponent(q) + '&limit=5');
+      const all = [
+        ...(res.professionals || []).map(p => ({ id: p.userId, name: p.user.firstName + ' ' + p.user.lastName, email: p.user.email, role: 'PRO' })),
+        ...(clients.users || []).filter(u => u.role === 'CLIENT').slice(0, 5).map(u => ({ id: u.id, name: u.firstName + ' ' + u.lastName, email: u.email, role: 'CLIENT' })),
+      ].slice(0, 8);
+
+      const box = document.getElementById('push-send-user-results');
+      if (all.length === 0) { box.style.display = 'none'; return; }
+      box.style.display = '';
+      box.innerHTML = all.map(u =>
+        `<div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px;" onmousedown="selectPushUser('${u.id}','${escHtml(u.name + ' (' + u.email + ')')}')">
+          <strong>${escHtml(u.name)}</strong> <span class="badge ${u.role === 'PRO' ? 'badge-orange' : 'badge-blue'}" style="font-size:9px;">${u.role}</span><br>
+          <span style="color:var(--muted);font-size:11px;">${escHtml(u.email)}</span>
+        </div>`
+      ).join('');
+    } catch(e) {}
+  }, 300);
+}
+
+function selectPushUser(id, label) {
+  document.getElementById('push-send-user-id').value = id;
+  document.getElementById('push-send-user-search').value = label;
+  document.getElementById('push-send-user-results').style.display = 'none';
+  const sel = document.getElementById('push-send-user-selected');
+  sel.textContent = '✓ ' + label;
+  sel.style.display = '';
+}
+
+async function sendTargetedPush() {
+  const errEl  = document.getElementById('push-send-error');
+  const resEl  = document.getElementById('push-send-result');
+  const btn    = document.getElementById('push-send-btn');
+  errEl.style.display = 'none';
+  resEl.style.display = 'none';
+
+  const userId = document.getElementById('push-send-user-id').value.trim();
+  const title  = document.getElementById('push-send-title').value.trim();
+  const body   = document.getElementById('push-send-body').value.trim();
+  const type   = document.getElementById('push-send-type').value;
+
+  if (!userId) { errEl.textContent = 'Sélectionnez un utilisateur'; errEl.style.display = 'block'; return; }
+  if (!title)  { errEl.textContent = 'Le titre est requis';          errEl.style.display = 'block'; return; }
+  if (!body)   { errEl.textContent = 'Le message est requis';        errEl.style.display = 'block'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Envoi…';
+
+  try {
+    const r = await apiCall('/admin/notifications/send', {
+      method: 'POST',
+      body: JSON.stringify({ userId, title, body, type }),
+    });
+
+    const pushSent = r.push?.sent;
+    const pushCount = r.push?.count ?? 0;
+    resEl.innerHTML = pushSent
+      ? `✅ Notification envoyée ! Push : ${pushCount} appareil(s) atteint(s).`
+      : `⚠️ Notification enregistrée en DB mais aucun token push actif pour cet utilisateur.`;
+    resEl.style.display = '';
+    btn.textContent = '✓ Envoyé';
+
+    loadPushStats();
+    if (_pushCurrentTab === 'history') loadPushHistory(1);
+  } catch(e) {
+    errEl.textContent = e.message || 'Erreur lors de l\'envoi';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = '📤 Envoyer';
+  }
+}
 
 // ══════════════════════════════════════════════════════════════
 // CODES PROMO & OFFRES

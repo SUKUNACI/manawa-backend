@@ -2962,6 +2962,183 @@ router.patch('/reviews/:id/flag', async (req, res, next) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// NOTIFICATIONS PUSH
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/admin/notifications/stats
+router.get('/notifications/stats', async (req, res, next) => {
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo  = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000);
+
+    const [
+      totalTokens, activeTokens, inactiveTokens,
+      tokensByPlatform, tokensByType,
+      totalNotifs, notifsLast30d, notifsLast7d,
+      unreadNotifs, totalBroadcasts, broadcastsLast30d,
+      usersWithToken, totalUsers,
+    ] = await Promise.all([
+      prisma.pushToken.count(),
+      prisma.pushToken.count({ where: { isActive: true } }),
+      prisma.pushToken.count({ where: { isActive: false } }),
+      prisma.pushToken.groupBy({ by: ['platform'], _count: { _all: true } }),
+      prisma.pushToken.groupBy({ by: ['type'],     _count: { _all: true } }),
+      prisma.notification.count(),
+      prisma.notification.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      prisma.notification.count({ where: { createdAt: { gte: sevenDaysAgo  } } }),
+      prisma.notification.count({ where: { read: false } }),
+      prisma.broadcastLog.count(),
+      prisma.broadcastLog.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      prisma.pushToken.groupBy({ by: ['userId'], where: { isActive: true } }).then(r => r.length),
+      prisma.user.count({ where: { deletedAt: null } }),
+    ]);
+
+    const coverageRate = totalUsers > 0 ? Math.round((usersWithToken / totalUsers) * 100) : 0;
+    const deliveryRate = totalTokens > 0 ? Math.round((activeTokens / totalTokens) * 100) : 0;
+
+    res.json({
+      tokens: {
+        total: totalTokens,
+        active: activeTokens,
+        inactive: inactiveTokens,
+        byPlatform: tokensByPlatform.map(r => ({ platform: r.platform, count: r._count._all })),
+        byType:     tokensByType.map(r => ({ type: r.type, count: r._count._all })),
+        coverageRate,
+        deliveryRate,
+        usersWithToken,
+      },
+      notifications: {
+        total: totalNotifs,
+        last30d: notifsLast30d,
+        last7d:  notifsLast7d,
+        unread:  unreadNotifs,
+        readRate: totalNotifs > 0 ? Math.round(((totalNotifs - unreadNotifs) / totalNotifs) * 100) : 0,
+      },
+      broadcasts: {
+        total: totalBroadcasts,
+        last30d: broadcastsLast30d,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/notifications/tokens — liste paginée de tous les tokens
+router.get('/notifications/tokens', async (req, res, next) => {
+  try {
+    const page    = Math.max(1, parseInt(req.query.page) || 1);
+    const limit   = 25;
+    const skip    = (page - 1) * limit;
+    const { platform, type, active, search } = req.query;
+
+    const where = {};
+    if (platform) where.platform = platform;
+    if (type)     where.type = type;
+    if (active === 'true')  where.isActive = true;
+    if (active === 'false') where.isActive = false;
+    if (search) {
+      where.user = {
+        OR: [
+          { firstName: { contains: search, mode: 'insensitive' } },
+          { lastName:  { contains: search, mode: 'insensitive' } },
+          { email:     { contains: search, mode: 'insensitive' } },
+        ],
+      };
+    }
+
+    const [tokens, total] = await Promise.all([
+      prisma.pushToken.findMany({
+        where, skip, take: limit,
+        orderBy: { lastUsed: 'desc' },
+        select: {
+          id: true, platform: true, type: true, isActive: true,
+          deviceId: true, lastUsed: true, createdAt: true,
+          token: true,
+          user: { select: { id: true, firstName: true, lastName: true, email: true, role: true } },
+        },
+      }),
+      prisma.pushToken.count({ where }),
+    ]);
+
+    res.json({ tokens, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/notifications/history — historique in-app paginé
+router.get('/notifications/history', async (req, res, next) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = 25;
+    const skip  = (page - 1) * limit;
+    const { userId, type, read } = req.query;
+
+    const where = {};
+    if (userId) where.userId = userId;
+    if (type)   where.type = type;
+    if (read === 'true')  where.read = true;
+    if (read === 'false') where.read = false;
+
+    const [notifications, total] = await Promise.all([
+      prisma.notification.findMany({
+        where, skip, take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true, email: true, role: true } },
+        },
+      }),
+      prisma.notification.count({ where }),
+    ]);
+
+    res.json({ notifications, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/notifications/send — envoyer une notif ciblée
+router.post('/notifications/send', async (req, res, next) => {
+  try {
+    const { userId, title, body, type } = req.body;
+    if (!userId || !title || !body) {
+      return res.status(400).json({ error: 'userId, title et body sont requis' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, firstName: true, lastName: true, deletedAt: true },
+    });
+    if (!user || user.deletedAt) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+
+    // Enregistrer en DB
+    const notif = await prisma.notification.create({
+      data: {
+        userId,
+        type: type || 'ADMIN',
+        title,
+        body,
+        message: body,
+      },
+    });
+
+    // Envoyer push
+    const pushResult = await sendPushNotification(userId, title, body, { type: type || 'ADMIN', notifId: notif.id });
+
+    res.json({
+      success: true,
+      notificationId: notif.id,
+      push: pushResult,
+    });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/admin/notifications/tokens/:id — invalider un token
+router.delete('/notifications/tokens/:id', async (req, res, next) => {
+  try {
+    const token = await prisma.pushToken.findUnique({ where: { id: req.params.id } });
+    if (!token) return res.status(404).json({ error: 'Token non trouvé' });
+    await prisma.pushToken.update({ where: { id: req.params.id }, data: { isActive: false } });
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// ══════════════════════════════════════════════════════════════
 // CODES PROMO & OFFRES
 // ══════════════════════════════════════════════════════════════
 

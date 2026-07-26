@@ -2573,19 +2573,38 @@ router.get('/config', async (req, res, next) => {
 // PATCH /api/admin/config — mettre à jour un ou plusieurs paramètres
 router.patch('/config', async (req, res, next) => {
   try {
-    const updates = req.body; // { key: value, ... }
+    const { confirmPassword, ...updates } = req.body;
     if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
       return res.status(400).json({ error: 'Body doit être un objet { key: value }' });
     }
 
     const { DEFAULTS } = require('../utils/appConfig');
-    const results = [];
 
-    for (const [key, value] of Object.entries(updates)) {
+    // Vérifier si l'une des clés à modifier est readonly ou requiresConfirmation
+    for (const key of Object.keys(updates)) {
       if (!DEFAULTS[key]) {
         return res.status(400).json({ error: `Clé inconnue: ${key}` });
       }
+      if (DEFAULTS[key].readonly) {
+        return res.status(403).json({ error: `La clé "${key}" est en lecture seule et ne peut pas être modifiée.` });
+      }
+    }
 
+    // Si l'une des clés nécessite une confirmation, vérifier le mot de passe admin
+    const needsConfirmation = Object.keys(updates).some(k => DEFAULTS[k]?.requiresConfirmation);
+    if (needsConfirmation) {
+      if (!confirmPassword) {
+        return res.status(403).json({ error: 'Ce paramètre nécessite une confirmation par mot de passe admin.', requiresConfirmation: true });
+      }
+      const admin = await prisma.user.findUnique({ where: { id: req.user.id }, select: { passwordHash: true } });
+      const valid = await bcrypt.compare(confirmPassword, admin.passwordHash);
+      if (!valid) {
+        return res.status(403).json({ error: 'Mot de passe incorrect.', requiresConfirmation: true });
+      }
+    }
+
+    const results = [];
+    for (const [key, value] of Object.entries(updates)) {
       // Validations métier
       if (key === 'commission_rate') {
         const num = parseFloat(value);

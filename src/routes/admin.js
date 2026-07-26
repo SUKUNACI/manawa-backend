@@ -2962,6 +2962,181 @@ router.patch('/reviews/:id/flag', async (req, res, next) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// MESSAGERIE
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/admin/messaging/stats
+router.get('/messaging/stats', async (req, res, next) => {
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo  = new Date(Date.now() -  7 * 24 * 60 * 60 * 1000);
+
+    const [total, last30d, last7d, unread, topSenders] = await Promise.all([
+      prisma.message.count(),
+      prisma.message.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      prisma.message.count({ where: { createdAt: { gte: sevenDaysAgo  } } }),
+      prisma.message.count({ where: { read: false } }),
+      prisma.message.groupBy({
+        by: ['senderId'],
+        _count: { _all: true },
+        orderBy: { _count: { senderId: 'desc' } },
+        take: 5,
+      }),
+    ]);
+
+    // Conversations distinctes (paires uniques triées)
+    const allPairs = await prisma.message.findMany({
+      select: { senderId: true, receiverId: true },
+      distinct: ['senderId', 'receiverId'],
+    });
+    const pairSet = new Set(allPairs.map(m => [m.senderId, m.receiverId].sort().join('|')));
+    const totalConversations = pairSet.size;
+
+    const pairsLast30d = await prisma.message.findMany({
+      where: { createdAt: { gte: thirtyDaysAgo } },
+      select: { senderId: true, receiverId: true },
+      distinct: ['senderId', 'receiverId'],
+    });
+    const activeConversations = new Set(pairsLast30d.map(m => [m.senderId, m.receiverId].sort().join('|'))).size;
+
+    // Enrichir top senders
+    const senderIds = topSenders.map(s => s.senderId);
+    const senderUsers = await prisma.user.findMany({
+      where: { id: { in: senderIds } },
+      select: { id: true, firstName: true, lastName: true, email: true, role: true },
+    });
+    const senderMap = Object.fromEntries(senderUsers.map(u => [u.id, u]));
+
+    res.json({
+      total, last30d, last7d, unread,
+      totalConversations, activeConversations,
+      topSenders: topSenders.map(s => ({
+        user: senderMap[s.senderId] || null,
+        count: s._count._all,
+      })),
+    });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/messaging/conversations — liste paginée des conversations
+router.get('/messaging/conversations', async (req, res, next) => {
+  try {
+    const page   = Math.max(1, parseInt(req.query.page) || 1);
+    const limit  = 20;
+    const { search } = req.query;
+
+    // Charger tous les messages récents pour grouper par paire
+    // On prend les N messages les plus récents puis on déduplique par paire
+    const where = {};
+    if (search) {
+      const matchingUsers = await prisma.user.findMany({
+        where: {
+          deletedAt: null,
+          OR: [
+            { firstName: { contains: search, mode: 'insensitive' } },
+            { lastName:  { contains: search, mode: 'insensitive' } },
+            { email:     { contains: search, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+      });
+      const ids = matchingUsers.map(u => u.id);
+      if (ids.length === 0) return res.json({ conversations: [], total: 0, page, pages: 0 });
+      where.OR = [{ senderId: { in: ids } }, { receiverId: { in: ids } }];
+    }
+
+    // Dernier message par paire — on charge un grand batch et on déduplique
+    const messages = await prisma.message.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 2000,
+      select: {
+        id: true, senderId: true, receiverId: true,
+        content: true, read: true, createdAt: true,
+        sender:   { select: { id: true, firstName: true, lastName: true, email: true, role: true, avatarUrl: true } },
+        receiver: { select: { id: true, firstName: true, lastName: true, email: true, role: true, avatarUrl: true } },
+      },
+    });
+
+    const convMap = new Map();
+    for (const m of messages) {
+      const key = [m.senderId, m.receiverId].sort().join('|');
+      if (!convMap.has(key)) convMap.set(key, m);
+    }
+    const allConvs = Array.from(convMap.values());
+    const total = allConvs.length;
+    const paginated = allConvs.slice((page - 1) * limit, page * limit);
+
+    // Enrichir avec nombre de messages non lus par paire
+    const enriched = await Promise.all(paginated.map(async m => {
+      const [msgCount, unreadCount] = await Promise.all([
+        prisma.message.count({
+          where: {
+            OR: [
+              { senderId: m.senderId, receiverId: m.receiverId },
+              { senderId: m.receiverId, receiverId: m.senderId },
+            ],
+          },
+        }),
+        prisma.message.count({
+          where: {
+            OR: [
+              { senderId: m.senderId, receiverId: m.receiverId, read: false },
+              { senderId: m.receiverId, receiverId: m.senderId, read: false },
+            ],
+          },
+        }),
+      ]);
+      return { ...m, msgCount, unreadCount };
+    }));
+
+    res.json({ conversations: enriched, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/messaging/conversations/:userA/:userB — messages entre deux users
+router.get('/messaging/conversations/:userA/:userB', async (req, res, next) => {
+  try {
+    const { userA, userB } = req.params;
+    const page  = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = 50;
+    const skip  = (page - 1) * limit;
+
+    const where = {
+      OR: [
+        { senderId: userA, receiverId: userB },
+        { senderId: userB, receiverId: userA },
+      ],
+    };
+
+    const [messages, total, userAInfo, userBInfo] = await Promise.all([
+      prisma.message.findMany({
+        where, skip, take: limit,
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true, senderId: true, content: true, read: true, createdAt: true,
+        },
+      }),
+      prisma.message.count({ where }),
+      prisma.user.findUnique({ where: { id: userA }, select: { id: true, firstName: true, lastName: true, email: true, role: true, avatarUrl: true } }),
+      prisma.user.findUnique({ where: { id: userB }, select: { id: true, firstName: true, lastName: true, email: true, role: true, avatarUrl: true } }),
+    ]);
+
+    res.json({ messages, total, page, pages: Math.ceil(total / limit), userA: userAInfo, userB: userBInfo });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/admin/messaging/messages/:id — supprimer un message
+router.delete('/messaging/messages/:id', async (req, res, next) => {
+  try {
+    const msg = await prisma.message.findUnique({ where: { id: req.params.id } });
+    if (!msg) return res.status(404).json({ error: 'Message non trouvé' });
+    await prisma.message.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// ══════════════════════════════════════════════════════════════
 // GESTION DES DEVIS
 // ══════════════════════════════════════════════════════════════
 

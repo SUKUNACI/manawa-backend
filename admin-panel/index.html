@@ -471,6 +471,17 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       </div>
     </div>
 
+    <!-- MODAL: DÉTAIL CLIENT -->
+    <div class="modal-overlay" id="modal-client" onclick="closeModal('modal-client')">
+      <div class="modal" onclick="event.stopPropagation()" style="max-width:640px;">
+        <div class="modal-header">
+          <span class="modal-title" id="mc-title">Client</span>
+          <button class="modal-close" onclick="closeModal('modal-client')">✕</button>
+        </div>
+        <div class="modal-body" id="mc-body"></div>
+      </div>
+    </div>
+
     <!-- ══ PAGE: PROJETS ══ -->
     <div class="page" id="page-projects">
       <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;" id="projects-kpis">
@@ -685,6 +696,16 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     <!-- ══ PAGE: ANALYTICS MÉTIER ══ -->
     <div class="page" id="page-analytics">
 
+      <!-- Filtre période -->
+      <div class="filters" style="margin-bottom:20px;">
+        <select class="filter-select" id="ana-period" onchange="loadAnalytics()" style="width:180px;">
+          <option value="365">12 derniers mois</option>
+          <option value="180">6 derniers mois</option>
+          <option value="90">3 derniers mois</option>
+          <option value="30">30 derniers jours</option>
+        </select>
+      </div>
+
       <!-- Entonnoir de conversion -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
 
@@ -824,6 +845,8 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
           <option value="COMMENT">Commentaires</option>
           <option value="PORTFOLIO">Portfolio</option>
         </select>
+        <input type="date" class="filter-input" id="mod-date-from" onchange="loadModeration(1)" style="width:150px;" title="Du">
+        <input type="date" class="filter-input" id="mod-date-to" onchange="loadModeration(1)" style="width:150px;" title="Au">
       </div>
 
       <div class="table-wrap">
@@ -1946,6 +1969,11 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     </div>
 
     <div class="page" id="page-deleted">
+      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">
+        <div class="kpi red"><div class="kpi-icon">🗑️</div><div class="kpi-val" id="del-kpi-total">--</div><div class="kpi-label">Comptes supprimés</div></div>
+        <div class="kpi green"><div class="kpi-icon">♻️</div><div class="kpi-val" id="del-kpi-restore">--</div><div class="kpi-label">Récupérables (30j)</div></div>
+        <div class="kpi orange"><div class="kpi-icon">⚠️</div><div class="kpi-val" id="del-kpi-old">--</div><div class="kpi-label">Anciens (&gt;30j)</div></div>
+      </div>
       <div class="filters">
         <input class="filter-input" placeholder="🔍 Rechercher par ID, nom, email..." id="deleted-search" oninput="loadDeletedUsers(1)">
       </div>
@@ -3294,7 +3322,17 @@ async function loadClients(page) {
         ? '<button class="btn btn-approve" onclick="event.stopPropagation();reactivateUser(\'' + u.id + '\',\'' + escAttr(name) + '\')">↺ Réactiver</button>'
         : '<button class="btn btn-reject" onclick="event.stopPropagation();suspendUser(\'' + u.id + '\',\'' + escAttr(name) + '\')">⏸ Suspendre</button>';
 
-      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(u.id) + '" onclick="navigator.clipboard.writeText(\'' + escAttr(u.id) + '\');showToast(\'ID copié\')">' + escHtml(u.id.substring(0, 6)) + '</span></td><td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + (u.phone ? ' · ' + escHtml(u.phone) : '') + '</span></td><td>' + escHtml(u.city || '-') + '</td><td>' + statusBadge + '</td><td>' + formatDate(u.createdAt) + '</td><td class="td-actions">' + actions + '<button class="btn btn-view" onclick="event.stopPropagation();resetClientPassword(\'' + u.id + '\',\'' + escAttr(name) + '\')" title="Reset mot de passe">🔑</button><button class="btn btn-reject" onclick="event.stopPropagation();deleteUser(\'' + u.id + '\',\'' + escAttr(name) + '\')" title="Supprimer">🗑</button></td></tr>';
+      return '<tr style="cursor:pointer;" onclick="openClientModal(\'' + escAttr(u.id) + '\')">'
+        + '<td><span style="font-family:monospace;font-size:11px;color:var(--orange);" title="' + escAttr(u.id) + '">' + escHtml(u.id.substring(0, 6)) + '</span></td>'
+        + '<td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + (u.phone ? ' · ' + escHtml(u.phone) : '') + '</span></td>'
+        + '<td>' + escHtml(u.city || '-') + '</td>'
+        + '<td>' + statusBadge + '</td>'
+        + '<td>' + formatDate(u.createdAt) + '</td>'
+        + '<td class="td-actions">'
+          + actions
+          + '<button class="btn btn-view" onclick="event.stopPropagation();resetClientPassword(\'' + u.id + '\',\'' + escAttr(name) + '\')" title="Reset mot de passe">🔑</button>'
+          + '<button class="btn btn-reject" onclick="event.stopPropagation();deleteUser(\'' + u.id + '\',\'' + escAttr(name) + '\')" title="Supprimer">🗑</button>'
+        + '</td></tr>';
     }).join('');
 
     // Pagination
@@ -3311,6 +3349,67 @@ async function loadClients(page) {
     if (err.message !== 'Unauthorized') {
       console.error('Clients error:', err);
     }
+  }
+}
+
+async function openClientModal(userId) {
+  try {
+    const u = await apiCall('/admin/users/' + userId);
+    document.getElementById('mc-title').textContent = (u.firstName || '') + ' ' + (u.lastName || '');
+
+    const suspended = u.suspended;
+    const statusBadge = suspended
+      ? '<span class="badge badge-red">Suspendu</span>'
+      : '<span class="badge badge-green">Actif</span>';
+
+    let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;">';
+    html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:12px;padding:14px;">';
+    html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">CONTACT</div>';
+    html += '<div style="font-weight:600;font-size:14px;">' + escHtml((u.firstName||'') + ' ' + (u.lastName||'')) + '</div>';
+    html += '<div style="font-size:12px;color:var(--muted);margin-top:2px;">' + escHtml(u.email) + '</div>';
+    if (u.phone) html += '<div style="font-size:12px;color:var(--muted);">' + escHtml(u.phone) + '</div>';
+    if (u.city)  html += '<div style="font-size:12px;color:var(--muted);">📍 ' + escHtml(u.city) + '</div>';
+    html += '</div>';
+
+    html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:12px;padding:14px;">';
+    html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">COMPTE</div>';
+    html += '<div style="margin-bottom:6px;">' + statusBadge + '</div>';
+    html += '<div style="font-size:12px;color:var(--muted);">Inscrit le ' + formatDate(u.createdAt) + '</div>';
+    html += '<div style="font-size:12px;color:var(--muted);">Email ' + (u.emailVerified ? '<span style="color:var(--green);">✓ vérifié</span>' : '<span style="color:var(--red);">✗ non vérifié</span>') + '</div>';
+    html += '</div></div>';
+
+    // Projets récents
+    if (u.projects && u.projects.length > 0) {
+      html += '<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px;">Projets récents (' + u.projects.length + ')</div>';
+      html += '<div style="display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto;">';
+      u.projects.forEach(p => {
+        const statusColors = { OPEN:'var(--green)', IN_PROGRESS:'var(--blue)', COMPLETED:'var(--muted)', CANCELLED:'var(--red)' };
+        const statusLabels = { OPEN:'Ouvert', IN_PROGRESS:'En cours', COMPLETED:'Terminé', CANCELLED:'Annulé' };
+        html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:10px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;">';
+        html += '<div><div style="font-size:13px;font-weight:500;">' + escHtml(p.title || 'Sans titre') + '</div>';
+        html += '<div style="font-size:11px;color:var(--muted);">' + formatDate(p.createdAt) + '</div></div>';
+        html += '<span style="font-size:11px;font-weight:600;color:' + (statusColors[p.status]||'var(--muted)') + ';">' + (statusLabels[p.status]||p.status) + '</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px;">Aucun projet publié</div>';
+    }
+
+    // Actions
+    html += '<div style="display:flex;gap:10px;margin-top:20px;">';
+    if (suspended) {
+      html += '<button class="btn btn-approve" style="flex:1;" onclick="reactivateUser(\'' + escAttr(u.id) + '\',\'' + escAttr((u.firstName||'') + ' ' + (u.lastName||'')) + '\');closeModal(\'modal-client\')">↺ Réactiver</button>';
+    } else {
+      html += '<button class="btn btn-reject" style="flex:1;" onclick="suspendUser(\'' + escAttr(u.id) + '\',\'' + escAttr((u.firstName||'') + ' ' + (u.lastName||'')) + '\');closeModal(\'modal-client\')">⏸ Suspendre</button>';
+    }
+    html += '<button class="btn btn-view" style="flex:1;" onclick="resetClientPassword(\'' + escAttr(u.id) + '\',\'' + escAttr((u.firstName||'') + ' ' + (u.lastName||'')) + '\')">🔑 Reset mot de passe</button>';
+    html += '</div>';
+
+    document.getElementById('mc-body').innerHTML = html;
+    document.getElementById('modal-client').classList.add('show');
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
   }
 }
 
@@ -3705,11 +3804,15 @@ async function loadModeration(page = 1) {
   modCurrentPage = page;
   loadModerationStats();
 
-  const status = document.getElementById('mod-status-filter').value;
-  const type   = document.getElementById('mod-type-filter').value;
+  const status   = document.getElementById('mod-status-filter').value;
+  const type     = document.getElementById('mod-type-filter').value;
+  const dateFrom = document.getElementById('mod-date-from').value;
+  const dateTo   = document.getElementById('mod-date-to').value;
   let url = '/admin/moderation/reports?page=' + page + '&limit=20';
-  if (status) url += '&status=' + status;
-  if (type)   url += '&contentType=' + type;
+  if (status)   url += '&status='      + status;
+  if (type)     url += '&contentType=' + type;
+  if (dateFrom) url += '&dateFrom='    + dateFrom;
+  if (dateTo)   url += '&dateTo='      + dateTo;
 
   try {
     const data = await apiCall(url);
@@ -3850,7 +3953,8 @@ async function moderationAction(action) {
 // ══════════════════════════════════════════════════════════════
 async function loadAnalytics() {
   try {
-    const d = await apiCall('/admin/analytics');
+    const days = document.getElementById('ana-period')?.value || '365';
+    const d = await apiCall('/admin/analytics?days=' + days);
 
     // ── Entonnoir ──────────────────────────────────────────
     const funnelSteps = [
@@ -4407,6 +4511,17 @@ async function loadDeletedUsers(page = 1) {
     const result = await apiCall(url);
     const tbody = document.getElementById('deleted-tbody');
     const empty = document.getElementById('deleted-empty');
+
+    // KPIs — calculés sur la première page sans filtre de recherche
+    if (page === 1 && !search) {
+      const allResult = await apiCall('/admin/users-deleted?page=1&limit=5000');
+      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const restorable = (allResult.users || []).filter(u => new Date(u.deletedAt).getTime() > thirtyDaysAgo).length;
+      const old = (allResult.total || 0) - restorable;
+      document.getElementById('del-kpi-total').textContent   = formatNumber(allResult.total || 0);
+      document.getElementById('del-kpi-restore').textContent = formatNumber(restorable);
+      document.getElementById('del-kpi-old').textContent     = formatNumber(old);
+    }
 
     if (!result.users || result.users.length === 0) {
       tbody.innerHTML = '';

@@ -1461,11 +1461,16 @@ router.patch('/finances/payments/:paymentId/mark-paid', async (req, res, next) =
 // GET /api/admin/moderation/reports — liste paginée des signalements
 router.get('/moderation/reports', async (req, res, next) => {
   try {
-    const { status = 'PENDING', contentType, page = 1, limit = 20 } = req.query;
+    const { status = 'PENDING', contentType, dateFrom, dateTo, page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
     const where = {};
     if (status) where.status = status;
     if (contentType) where.contentType = contentType;
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+      if (dateTo)   where.createdAt.lte = new Date(dateTo + 'T23:59:59.999Z');
+    }
 
     const [reports, total] = await Promise.all([
       prisma.contentReport.findMany({
@@ -1617,6 +1622,10 @@ router.patch('/moderation/reports/:id/remove', async (req, res, next) => {
 // GET /api/admin/analytics — données analytiques complètes
 router.get('/analytics', async (req, res, next) => {
   try {
+    const days = Math.min(365, Math.max(7, parseInt(req.query.days) || 365));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const dateFilter = { createdAt: { gte: since } };
+
     // ── Entonnoir de conversion ──────────────────────────────
     const [
       totalProjects,
@@ -1626,12 +1635,11 @@ router.get('/analytics', async (req, res, next) => {
       totalClients,
       clientsWithMultipleProjects,
     ] = await Promise.all([
-      prisma.project.count(),
-      prisma.project.count({ where: { quotes: { some: {} } } }),
-      prisma.quote.count({ where: { status: 'ACCEPTED' } }),
-      prisma.payment.count({ where: { status: 'succeeded', isDeposit: true } }),
+      prisma.project.count({ where: dateFilter }),
+      prisma.project.count({ where: { ...dateFilter, quotes: { some: {} } } }),
+      prisma.quote.count({ where: { ...dateFilter, status: 'ACCEPTED' } }),
+      prisma.payment.count({ where: { ...dateFilter, status: 'succeeded', isDeposit: true } }),
       prisma.user.count({ where: { role: 'CLIENT' } }),
-      // Clients ayant posté >1 projet
       prisma.user.count({
         where: {
           role: 'CLIENT',

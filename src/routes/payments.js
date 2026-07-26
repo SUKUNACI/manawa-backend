@@ -533,6 +533,66 @@ router.get('/history', requireAuth, async (req, res, next) => {
   }
 });
 
+// POST /api/payments/disputes — ouvrir un litige sur un paiement
+router.post('/disputes', requireAuth, async (req, res, next) => {
+  try {
+    const { paymentId, reason, description } = req.body;
+    if (!paymentId || !reason) return res.status(400).json({ error: 'paymentId et reason requis' });
+
+    const validReasons = [
+      'Travaux non réalisés',
+      'Qualité non conforme',
+      'Dépassement de budget non autorisé',
+      'Paiement en double',
+      'Annulation sans remboursement',
+      'Litige contractuel',
+      'Autre',
+    ];
+    if (!validReasons.includes(reason)) return res.status(400).json({ error: 'Raison invalide' });
+
+    // Vérifier que le paiement appartient à un projet du client
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { quote: { include: { project: { select: { clientId: true } } } } },
+    });
+    if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
+    if (payment.quote.project.clientId !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
+    if (payment.status !== 'succeeded') return res.status(400).json({ error: 'Impossible d\'ouvrir un litige sur ce paiement' });
+
+    // Bloquer un deuxième litige sur le même paiement
+    const existing = await prisma.dispute.findFirst({ where: { paymentId, clientId: req.user.id, status: { not: 'RESOLVED_REJECTED' } } });
+    if (existing) return res.status(409).json({ error: 'Un litige est déjà ouvert pour ce paiement' });
+
+    const dispute = await prisma.dispute.create({
+      data: { paymentId, clientId: req.user.id, reason, description: description || null, status: 'OPEN' },
+    });
+    res.status(201).json(dispute);
+  } catch (err) { next(err); }
+});
+
+// GET /api/payments/disputes/me — litiges du client connecté
+router.get('/disputes/me', requireAuth, async (req, res, next) => {
+  try {
+    const disputes = await prisma.dispute.findMany({
+      where: { clientId: req.user.id },
+      include: {
+        payment: {
+          include: {
+            quote: {
+              include: {
+                professional: { include: { user: { select: { firstName: true, lastName: true } } } },
+                project: { select: { title: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(disputes);
+  } catch (err) { next(err); }
+});
+
 // GET /api/payments/providers (list MMO providers)
 router.get('/providers', async (req, res, next) => {
   try {

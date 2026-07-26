@@ -1747,6 +1747,126 @@ router.get('/analytics', async (req, res, next) => {
 });
 
 // ──────────────────────────────────────────────────────────────
+// LITIGES & REMBOURSEMENTS
+// ──────────────────────────────────────────────────────────────
+
+const DISPUTE_STATUSES = ['OPEN', 'UNDER_REVIEW', 'RESOLVED_REFUND', 'RESOLVED_PARTIAL', 'RESOLVED_REJECTED'];
+
+// GET /api/admin/disputes/stats
+router.get('/disputes/stats', async (req, res, next) => {
+  try {
+    const [total, open, underReview, resolvedRefund, resolvedPartial, resolvedRejected, totalRefunded] = await Promise.all([
+      prisma.dispute.count(),
+      prisma.dispute.count({ where: { status: 'OPEN' } }),
+      prisma.dispute.count({ where: { status: 'UNDER_REVIEW' } }),
+      prisma.dispute.count({ where: { status: 'RESOLVED_REFUND' } }),
+      prisma.dispute.count({ where: { status: 'RESOLVED_PARTIAL' } }),
+      prisma.dispute.count({ where: { status: 'RESOLVED_REJECTED' } }),
+      prisma.dispute.aggregate({ where: { status: { in: ['RESOLVED_REFUND', 'RESOLVED_PARTIAL'] } }, _sum: { refundAmount: true } }),
+    ]);
+    res.json({
+      total,
+      open,
+      underReview,
+      resolvedRefund,
+      resolvedPartial,
+      resolvedRejected,
+      totalRefunded: totalRefunded._sum.refundAmount || 0,
+    });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/disputes
+router.get('/disputes', async (req, res, next) => {
+  try {
+    const { status = '', search = '', page = 1, limit = 20 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const where = {};
+    if (status) where.status = status;
+    if (search) {
+      where.OR = [
+        { client: { firstName: { contains: search, mode: 'insensitive' } } },
+        { client: { lastName:  { contains: search, mode: 'insensitive' } } },
+        { client: { email:     { contains: search, mode: 'insensitive' } } },
+        { reason: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [disputes, total] = await Promise.all([
+      prisma.dispute.findMany({
+        where,
+        include: {
+          client: { select: { id: true, firstName: true, lastName: true, email: true } },
+          payment: {
+            include: {
+              quote: {
+                include: {
+                  professional: { include: { user: { select: { firstName: true, lastName: true, email: true } } } },
+                  project: { select: { title: true } },
+                },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: Number(limit),
+      }),
+      prisma.dispute.count({ where }),
+    ]);
+
+    res.json({ disputes, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/disputes/:id
+router.get('/disputes/:id', async (req, res, next) => {
+  try {
+    const dispute = await prisma.dispute.findUnique({
+      where: { id: req.params.id },
+      include: {
+        client: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+        payment: {
+          include: {
+            quote: {
+              include: {
+                professional: { include: { user: { select: { firstName: true, lastName: true, email: true } } } },
+                project: { select: { id: true, title: true, city: true } },
+                items: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!dispute) return res.status(404).json({ error: 'Litige introuvable' });
+    res.json(dispute);
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/admin/disputes/:id/status — changer le statut (OPEN → UNDER_REVIEW…)
+router.patch('/disputes/:id/status', async (req, res, next) => {
+  try {
+    const { status, adminNote, refundAmount } = req.body;
+    if (!DISPUTE_STATUSES.includes(status)) return res.status(400).json({ error: 'Statut invalide' });
+
+    const data = { status, adminNote: adminNote || null, updatedAt: new Date() };
+    if (['RESOLVED_REFUND', 'RESOLVED_PARTIAL', 'RESOLVED_REJECTED'].includes(status)) {
+      data.resolvedBy = req.user.id;
+      data.resolvedAt = new Date();
+    }
+    if (status === 'RESOLVED_REFUND' || status === 'RESOLVED_PARTIAL') {
+      if (!refundAmount || refundAmount <= 0) return res.status(400).json({ error: 'Montant de remboursement requis' });
+      data.refundAmount = Number(refundAmount);
+    }
+
+    const updated = await prisma.dispute.update({ where: { id: req.params.id }, data });
+    res.json(updated);
+  } catch (err) { next(err); }
+});
+
+// ──────────────────────────────────────────────────────────────
 // COMMUNICATION
 // ──────────────────────────────────────────────────────────────
 

@@ -1140,6 +1140,7 @@ async function suspendPro(proId, name) {
     await apiCall('/admin/professionals/' + proId + '/suspend', { method: 'PATCH' });
     showToast('Compte de ' + name + ' suspendu');
     loadProfessionals(prosCurrentPage);
+    if (document.getElementById('modal-project').classList.contains('show')) viewProfessional(proId);
   } catch (err) {
     showToast('Erreur: ' + err.message, true);
   }
@@ -1150,6 +1151,7 @@ async function reactivatePro(proId, name) {
     await apiCall('/admin/professionals/' + proId + '/reactivate', { method: 'PATCH' });
     showToast('Compte de ' + name + ' réactivé');
     loadProfessionals(prosCurrentPage);
+    if (document.getElementById('modal-project').classList.contains('show')) viewProfessional(proId);
   } catch (err) {
     showToast('Erreur: ' + err.message, true);
   }
@@ -1295,7 +1297,7 @@ async function viewProfessional(proId) {
     } else {
       html += '<button class="btn btn-reject" onclick="suspendPro(\'' + data.id + '\',\'' + escAttr(name) + '\')">⏸ Suspendre</button>';
     }
-    if (!data.hasDecennaleInsurance) {
+    if (!data.decennaleVerified) {
       html += '<button class="btn btn-approve" onclick="verifyDecennale(\'' + data.id + '\',\'' + escAttr(name) + '\')">🛡️ Valider décennale</button>';
     }
     html += '<button class="btn btn-view" onclick="resetProPassword(\'' + u.id + '\',\'' + escAttr(name) + '\')">🔑 Reset mot de passe</button>';

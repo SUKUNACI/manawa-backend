@@ -1604,12 +1604,46 @@ async function viewProject(id) {
       html += '</div>';
     }
 
+    // Barre d'actions admin
+    const statuses = [
+      { val: 'OPEN',        label: '● Ouvert',    cls: 'badge-green' },
+      { val: 'IN_PROGRESS', label: '▶ En cours',  cls: 'badge-blue' },
+      { val: 'COMPLETED',   label: '✓ Terminé',   cls: 'badge-orange' },
+      { val: 'CANCELLED',   label: '✕ Annulé',    cls: 'badge-red' },
+    ];
+    html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:8px;">';
+    html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:10px;">Changer le statut</div>';
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+    statuses.forEach(s => {
+      const isCurrent = p.status === s.val;
+      html += '<button class="btn ' + (isCurrent ? 'btn-approve' : 'btn-view') + '" style="' + (isCurrent ? 'opacity:0.5;cursor:default;' : '') + '" '
+        + (isCurrent ? 'disabled' : 'onclick="changeProjectStatus(\'' + p.id + '\',\'' + s.val + '\')"') + '>'
+        + s.label + '</button>';
+    });
+    html += '</div>';
+    html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">';
+    html += '<button class="btn btn-reject" onclick="closeModal(\'modal-project\');deleteProject(\'' + p.id + '\',\'' + escAttr(p.title) + '\')">🗑 Supprimer ce projet</button>';
+    html += '</div></div>';
+
     document.getElementById('mp-title').textContent = p.title;
     document.getElementById('mp-content').innerHTML = html;
     document.getElementById('modal-project').classList.add('show');
   } catch (err) {
     showToast('Erreur lors du chargement du projet');
     console.error(err);
+  }
+}
+
+async function changeProjectStatus(projectId, status) {
+  const labels = { OPEN: 'Ouvert', IN_PROGRESS: 'En cours', COMPLETED: 'Terminé', CANCELLED: 'Annulé' };
+  if (!confirm('Changer le statut du projet en "' + labels[status] + '" ?')) return;
+  try {
+    await apiCall('/admin/projects/' + projectId, { method: 'PATCH', body: JSON.stringify({ status }) });
+    showToast('Statut mis à jour : ' + labels[status]);
+    loadProjects(1);
+    viewProject(projectId);
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
   }
 }
 

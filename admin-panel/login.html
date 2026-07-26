@@ -31,59 +31,8 @@ input:focus{border-color:var(--orange);}
   <input type="email" id="email" placeholder="Votre email admin" autocomplete="username">
   <label>Mot de passe</label>
   <input type="password" id="password" placeholder="Votre mot de passe" autocomplete="current-password">
-  <button class="btn" id="btn" onclick="doLogin()">Se connecter</button>
+  <button class="btn" id="btn">Se connecter</button>
 </div>
-<script>
-const API = window.location.origin + '/api';
-
-document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-document.getElementById('email').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('password').focus(); });
-
-async function doLogin() {
-  const email = document.getElementById('email').value.trim();
-  const password = document.getElementById('password').value;
-  const err = document.getElementById('err');
-  const btn = document.getElementById('btn');
-
-  err.style.display = 'none';
-  if (!email || !password) { err.textContent = 'Veuillez remplir tous les champs'; err.style.display = 'block'; return; }
-
-  btn.disabled = true;
-  btn.textContent = 'Connexion...';
-
-  try {
-    const res = await fetch(API + '/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    const data = await res.json();
-
-    if (!res.ok || data.user?.role !== 'ADMIN') {
-      err.textContent = data.error || 'Accès refusé — compte non administrateur';
-      err.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Se connecter';
-      return;
-    }
-
-    // Poser le cookie httpOnly admin
-    await fetch(API + '/auth/admin-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ token: data.token }),
-    });
-
-    // Rediriger vers le dashboard (protégé par cookie)
-    window.location.href = '/admin/';
-  } catch {
-    err.textContent = 'Erreur réseau, réessayez';
-    err.style.display = 'block';
-    btn.disabled = false;
-    btn.textContent = 'Se connecter';
-  }
-}
-</script>
+<script src="/admin/login.js"></script>
 </body>
 </html>

@@ -188,8 +188,8 @@ router.post('/admin-session', async (req, res) => {
     if (decoded.role !== 'ADMIN') return res.status(403).json({ error: 'Accès refusé' });
     res.cookie('adminToken', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      secure: true,
+      sameSite: 'lax',
       maxAge: 15 * 60 * 1000, // 15 min, durée de l'access token
     });
     res.json({ ok: true });

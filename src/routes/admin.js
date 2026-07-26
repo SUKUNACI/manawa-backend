@@ -1660,7 +1660,7 @@ router.get('/analytics', async (req, res, next) => {
       _count: { _all: true },
       orderBy: { _count: { city: 'desc' } },
       take: 10,
-      where: { city: { not: null } },
+      where: { city: { not: '' } },
     });
 
     // ── Délai moyen projet → premier devis (en jours) ────────

@@ -630,6 +630,24 @@ router.patch('/professionals/:id/verify-decennale', async (req, res, next) => {
   }
 });
 
+// PATCH /api/admin/professionals/:id/revoke-decennale — révoquer la validation décennale
+router.patch('/professionals/:id/revoke-decennale', async (req, res, next) => {
+  try {
+    const professional = await prisma.professional.findUnique({ where: { id: req.params.id } });
+    if (!professional) return res.status(404).json({ error: 'Professionnel non trouvé' });
+
+    const updated = await prisma.professional.update({
+      where: { id: req.params.id },
+      data: { decennaleVerified: false },
+      include: { user: { select: { firstName: true, lastName: true, email: true } } },
+    });
+
+    res.json({ message: 'Validation décennale révoquée', professional: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/admin/professionals/:id/complaint — enregistrer une plainte
 router.post('/professionals/:id/complaint', async (req, res, next) => {
   try {

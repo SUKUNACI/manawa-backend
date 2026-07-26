@@ -42,6 +42,7 @@ model User {
   profileViews        ProfileView[]
   projects            Project[]       @relation("ClientProjects")
   reviewsWritten      Review[]        @relation("ReviewAuthor")
+  contentReports      ContentReport[]
   supportTickets      SupportTicket[]
   pushTokens          PushToken[]
   notifications       Notification[]
@@ -327,6 +328,7 @@ model Review {
   author         User         @relation("ReviewAuthor", fields: [authorId], references: [id])
   professional   Professional @relation("ReviewedProfessional", fields: [professionalId], references: [id])
   project        Project?     @relation(fields: [projectId], references: [id])
+  flags          ReviewFlag[]
 }
 
 model SupportTicket {
@@ -398,6 +400,37 @@ enum QuoteItemCategory {
 enum AccountType {
   INDEPENDENT
   ENTREPRISE
+}
+
+model ContentReport {
+  id           String   @id @default(uuid())
+  reporterId   String
+  contentType  String   // REVIEW | COMMENT | PORTFOLIO
+  contentId    String
+  reason       String
+  details      String?
+  status       String   @default("PENDING") // PENDING | DISMISSED | REMOVED
+  resolvedBy   String?
+  resolvedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  reporter     User     @relation(fields: [reporterId], references: [id])
+
+  @@index([status])
+  @@index([contentType, contentId])
+  @@index([reporterId])
+}
+
+model ReviewFlag {
+  id         String   @id @default(uuid())
+  reviewId   String
+  flaggedBy  String   @default("system")
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  review     Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
 }
 
 model PushToken {

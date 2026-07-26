@@ -243,6 +243,10 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   <div class="nav-item" onclick="showPage('audit',this)"><span class="ni">📜</span> Journal d'audit</div>
   <div class="nav-item" onclick="showPage('finances',this)"><span class="ni">💹</span> Finances & Revenus</div>
   <div class="nav-item" onclick="showPage('analytics',this)"><span class="ni">🔬</span> Analytics Métier</div>
+  <div class="nav-item" onclick="showPage('moderation',this)">
+    <span class="ni">🛡️</span> Modération
+    <span class="nav-badge" id="badge-moderation" style="display:none;">0</span>
+  </div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
     <span class="nav-badge orange" id="badge-support" style="display:none;">0</span>
@@ -766,6 +770,62 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       </div>
     </div>
 
+    <!-- ══ PAGE: MODÉRATION ══ -->
+    <div class="page" id="page-moderation">
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;">
+        <div class="kpi red"><div class="kpi-icon">⏳</div><div class="kpi-val" id="mod-pending">--</div><div class="kpi-label">En attente</div></div>
+        <div class="kpi orange"><div class="kpi-icon">📋</div><div class="kpi-val" id="mod-total">--</div><div class="kpi-label">Total signalements</div></div>
+        <div class="kpi green"><div class="kpi-icon">🗑️</div><div class="kpi-val" id="mod-removed">--</div><div class="kpi-label">Contenus supprimés</div></div>
+        <div class="kpi blue"><div class="kpi-icon">✅</div><div class="kpi-val" id="mod-dismissed">--</div><div class="kpi-label">Signalements ignorés</div></div>
+      </div>
+
+      <div class="filters">
+        <select class="filter-select" id="mod-status-filter" onchange="loadModeration(1)">
+          <option value="PENDING">En attente</option>
+          <option value="">Tous</option>
+          <option value="DISMISSED">Ignorés</option>
+          <option value="REMOVED">Supprimés</option>
+        </select>
+        <select class="filter-select" id="mod-type-filter" onchange="loadModeration(1)">
+          <option value="">Tous les types</option>
+          <option value="REVIEW">Avis</option>
+          <option value="COMMENT">Commentaires</option>
+          <option value="PORTFOLIO">Portfolio</option>
+        </select>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Type</th><th>Contenu signalé</th><th>Auteur</th><th>Raison</th><th>Signalé par</th><th>Date</th><th>Statut</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="mod-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="mod-empty" style="display:none;">
+        <div class="es-icon">🛡️</div>
+        <p>Aucun signalement en attente</p>
+      </div>
+      <div class="pagination" id="mod-pagination" style="display:none;">
+        <button class="btn btn-view" id="mod-prev" onclick="loadModeration(modCurrentPage-1)">← Précédent</button>
+        <span class="page-info" id="mod-page-info"></span>
+        <button class="btn btn-view" id="mod-next" onclick="loadModeration(modCurrentPage+1)">Suivant →</button>
+      </div>
+    </div>
+
+    <!-- ══ MODAL: DÉTAIL SIGNALEMENT ══ -->
+    <div class="modal-overlay" id="modal-moderation">
+      <div class="modal" style="width:600px;max-height:85vh;overflow-y:auto;">
+        <h2 style="margin-bottom:16px;">🛡️ Détail du signalement</h2>
+        <div id="mod-modal-body"></div>
+        <div class="modal-actions" style="margin-top:16px;">
+          <button class="btn btn-view" onclick="closeModal('modal-moderation')">Fermer</button>
+          <button class="btn btn-view" id="mod-dismiss-btn" onclick="moderationAction('dismiss')">✅ Ignorer</button>
+          <button class="btn btn-reject" id="mod-remove-btn" onclick="moderationAction('remove')">🗑️ Supprimer le contenu</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ══ PAGE: SUPPORT ══ -->
     <div class="page" id="page-support">
       <div class="filters">
@@ -901,6 +961,7 @@ const titles = {
   audit: 'Journal d\'audit',
   finances: 'Finances & Revenus',
   analytics: 'Analytics Métier',
+  moderation: 'Modération de contenu',
   support: 'Support',
   deleted: 'Comptes supprimés'
 };
@@ -966,6 +1027,7 @@ async function doLogin() {
 
     document.getElementById('login-overlay').classList.add('hidden');
     loadDashboard();
+    loadModerationStats();
   } catch (err) {
     errEl.textContent = err.message;
     errEl.style.display = 'block';
@@ -1038,6 +1100,7 @@ function showPage(id, el) {
     case 'audit': loadAuditLogs(1); break;
     case 'finances': loadFinances(); break;
     case 'analytics': loadAnalytics(); break;
+    case 'moderation': loadModeration(1); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
   }
@@ -2167,6 +2230,173 @@ async function loadPayments(page) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// MODÉRATION DE CONTENU
+// ══════════════════════════════════════════════════════════════
+let modCurrentPage = 1;
+let currentReportId = null;
+
+async function loadModerationStats() {
+  try {
+    const s = await apiCall('/admin/moderation/stats');
+    document.getElementById('mod-pending').textContent = formatNumber(s.pending);
+    document.getElementById('mod-total').textContent = formatNumber(s.total);
+    document.getElementById('mod-removed').textContent = formatNumber(s.removed);
+    document.getElementById('mod-dismissed').textContent = formatNumber(s.dismissed);
+    // Badge nav
+    if (s.pending > 0) {
+      document.getElementById('badge-moderation').textContent = s.pending;
+      document.getElementById('badge-moderation').style.display = '';
+    } else {
+      document.getElementById('badge-moderation').style.display = 'none';
+    }
+  } catch (_) {}
+}
+
+async function loadModeration(page = 1) {
+  modCurrentPage = page;
+  loadModerationStats();
+
+  const status = document.getElementById('mod-status-filter').value;
+  const type   = document.getElementById('mod-type-filter').value;
+  let url = '/admin/moderation/reports?page=' + page + '&limit=20';
+  if (status) url += '&status=' + status;
+  if (type)   url += '&contentType=' + type;
+
+  try {
+    const data = await apiCall(url);
+    const tbody  = document.getElementById('mod-tbody');
+    const empty  = document.getElementById('mod-empty');
+    const pag    = document.getElementById('mod-pagination');
+
+    if (!data.reports || data.reports.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      pag.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+
+    const typeLabel = { REVIEW: '⭐ Avis', COMMENT: '💬 Commentaire', PORTFOLIO: '🖼️ Portfolio' };
+    const statusBadge = {
+      PENDING:   '<span class="badge" style="background:var(--red-dim);color:var(--red);">⏳ En attente</span>',
+      DISMISSED: '<span class="badge" style="background:var(--green-dim);color:var(--green);">✅ Ignoré</span>',
+      REMOVED:   '<span class="badge" style="background:rgba(107,114,128,0.15);color:var(--muted);">🗑️ Supprimé</span>',
+    };
+
+    tbody.innerHTML = data.reports.map(r => {
+      const c = r.content;
+      const excerpt = c ? escHtml((c.text || '').slice(0, 60) + ((c.text || '').length > 60 ? '…' : '')) : '<em style="color:var(--muted);">Contenu supprimé</em>';
+      const authorInfo = c ? escHtml(c.authorName || '') : '—';
+      const reporterName = escHtml((r.reporter.firstName || '') + ' ' + (r.reporter.lastName || ''));
+
+      return '<tr>'
+        + '<td>' + (typeLabel[r.contentType] || r.contentType) + '</td>'
+        + '<td style="max-width:200px;">' + excerpt + '</td>'
+        + '<td style="font-size:12px;">' + authorInfo + '</td>'
+        + '<td style="font-size:12px;color:var(--orange);">' + escHtml(r.reason) + '</td>'
+        + '<td style="font-size:12px;">' + reporterName + '</td>'
+        + '<td style="font-size:12px;">' + formatDate(r.createdAt) + '</td>'
+        + '<td>' + (statusBadge[r.status] || r.status) + '</td>'
+        + '<td>'
+          + (r.status === 'PENDING'
+            ? '<button class="btn btn-view" onclick="openModerationModal(\'' + escAttr(r.id) + '\')" style="font-size:11px;padding:6px 10px;">👁 Voir</button>'
+            : '<button class="btn btn-view" onclick="openModerationModal(\'' + escAttr(r.id) + '\')" style="font-size:11px;padding:6px 10px;">📋 Détail</button>')
+        + '</td>'
+        + '</tr>';
+    }).join('');
+
+    if (data.totalPages > 1) {
+      pag.style.display = 'flex';
+      document.getElementById('mod-prev').disabled = page <= 1;
+      document.getElementById('mod-next').disabled = page >= data.totalPages;
+      document.getElementById('mod-page-info').textContent = 'Page ' + page + ' / ' + data.totalPages + ' (' + data.total + ' signalements)';
+    } else {
+      pag.style.display = 'none';
+    }
+  } catch (err) {
+    showToast('Erreur modération : ' + err.message, true);
+  }
+}
+
+async function openModerationModal(reportId) {
+  currentReportId = reportId;
+  try {
+    // Recharger les données fraîches
+    const data = await apiCall('/admin/moderation/reports?limit=100&status=');
+    const r = (data.reports || []).find(x => x.id === reportId);
+    if (!r) { showToast('Signalement introuvable', true); return; }
+
+    const c = r.content;
+    const typeLabel = { REVIEW: '⭐ Avis', COMMENT: '💬 Commentaire', PORTFOLIO: '🖼️ Portfolio' };
+    const statusBadge = {
+      PENDING:   '<span class="badge" style="background:var(--red-dim);color:var(--red);">⏳ En attente</span>',
+      DISMISSED: '<span class="badge" style="background:var(--green-dim);color:var(--green);">✅ Ignoré</span>',
+      REMOVED:   '<span class="badge" style="background:rgba(107,114,128,0.15);color:var(--muted);">🗑️ Supprimé</span>',
+    };
+
+    let contentHtml = '';
+    if (c) {
+      contentHtml = '<div style="background:var(--dark4);border-radius:12px;padding:16px;margin-bottom:12px;">';
+      if (r.contentType === 'REVIEW') {
+        const stars = '★'.repeat(c.rating || 0) + '☆'.repeat(5 - (c.rating || 0));
+        contentHtml += '<div style="font-size:18px;color:var(--yellow);margin-bottom:6px;">' + stars + '</div>';
+      }
+      contentHtml += '<p style="font-size:14px;color:var(--light);line-height:1.6;margin-bottom:8px;">' + escHtml(c.text || '(sans texte)') + '</p>';
+      contentHtml += '<div style="font-size:12px;color:var(--muted);">Auteur : <strong style="color:var(--white);">' + escHtml(c.authorName || '?') + '</strong> · ' + escHtml(c.authorEmail || '') + '</div>';
+      if (c.targetName) contentHtml += '<div style="font-size:12px;color:var(--muted);margin-top:4px;">Sur le profil de : <strong style="color:var(--white);">' + escHtml(c.targetName) + '</strong></div>';
+      contentHtml += '</div>';
+    } else {
+      contentHtml = '<div style="background:var(--dark4);border-radius:12px;padding:16px;margin-bottom:12px;color:var(--muted);font-size:13px;">⚠️ Contenu introuvable (peut-être déjà supprimé)</div>';
+    }
+
+    document.getElementById('mod-modal-body').innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">'
+      + '<div style="background:var(--dark4);border-radius:10px;padding:12px;">'
+      + '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Type</div>'
+      + '<div style="font-size:14px;font-weight:600;">' + (typeLabel[r.contentType] || r.contentType) + '</div>'
+      + '</div>'
+      + '<div style="background:var(--dark4);border-radius:10px;padding:12px;">'
+      + '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Statut</div>'
+      + (statusBadge[r.status] || r.status)
+      + '</div>'
+      + '</div>'
+      + '<div style="margin-bottom:12px;">'
+      + '<div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Raison du signalement</div>'
+      + '<div style="font-size:14px;font-weight:600;color:var(--orange);">' + escHtml(r.reason) + '</div>'
+      + (r.details ? '<div style="font-size:13px;color:var(--light);margin-top:4px;">' + escHtml(r.details) + '</div>' : '')
+      + '</div>'
+      + '<div style="margin-bottom:12px;">'
+      + '<div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Signalé par</div>'
+      + '<div style="font-size:14px;">' + escHtml((r.reporter.firstName || '') + ' ' + (r.reporter.lastName || '')) + '</div>'
+      + '<div style="font-size:12px;color:var(--muted);">' + escHtml(r.reporter.email) + ' · ' + formatDate(r.createdAt) + '</div>'
+      + '</div>'
+      + '<div style="margin-bottom:4px;"><div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Contenu signalé</div>' + contentHtml + '</div>';
+
+    // Cacher les boutons d'action si déjà traité
+    document.getElementById('mod-dismiss-btn').style.display = r.status === 'PENDING' ? '' : 'none';
+    document.getElementById('mod-remove-btn').style.display  = r.status === 'PENDING' ? '' : 'none';
+
+    document.getElementById('modal-moderation').classList.add('show');
+  } catch (err) {
+    showToast('Erreur : ' + err.message, true);
+  }
+}
+
+async function moderationAction(action) {
+  if (!currentReportId) return;
+  const label = action === 'remove' ? 'supprimer définitivement le contenu' : 'ignorer ce signalement';
+  if (!confirm('Confirmer : ' + label + ' ?')) return;
+  try {
+    await apiCall('/admin/moderation/reports/' + currentReportId + '/' + action, { method: 'PATCH' });
+    closeModal('modal-moderation');
+    showToast(action === 'remove' ? '🗑️ Contenu supprimé' : '✅ Signalement ignoré');
+    loadModeration(modCurrentPage);
+  } catch (err) {
+    showToast('Erreur : ' + err.message, true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // ANALYTICS MÉTIER
 // ══════════════════════════════════════════════════════════════
 async function loadAnalytics() {
@@ -2985,6 +3215,7 @@ async function changeSupportStatus() {
       }
     } catch(e) {}
     loadDashboard();
+    loadModerationStats();
   }
 })();
 </script>

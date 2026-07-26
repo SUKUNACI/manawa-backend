@@ -22,12 +22,15 @@ jest.mock('../src/config/db', () => ({
     count: jest.fn(),
     create: jest.fn(),
     findFirst: jest.fn(),
+    findUnique: jest.fn(),
     delete: jest.fn(),
   },
   portfolioLike: {
     findFirst: jest.fn(),
+    findUnique: jest.fn(),
     create: jest.fn(),
     delete: jest.fn(),
+    deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
   },
   profileView: {
     upsert: jest.fn().mockResolvedValue({}),

@@ -1386,6 +1386,162 @@ router.patch('/finances/payments/:paymentId/mark-paid', async (req, res, next) =
 });
 
 // ══════════════════════════════════════════════════════════════
+// MODÉRATION DE CONTENU
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/admin/moderation/reports — liste paginée des signalements
+router.get('/moderation/reports', async (req, res, next) => {
+  try {
+    const { status = 'PENDING', contentType, page = 1, limit = 20 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+    const where = {};
+    if (status) where.status = status;
+    if (contentType) where.contentType = contentType;
+
+    const [reports, total] = await Promise.all([
+      prisma.contentReport.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: Number(limit),
+        include: {
+          reporter: { select: { id: true, firstName: true, lastName: true, email: true } },
+        },
+      }),
+      prisma.contentReport.count({ where }),
+    ]);
+
+    // Enrichir chaque signalement avec le contenu ciblé
+    const enriched = await Promise.all(reports.map(async (r) => {
+      let content = null;
+      try {
+        if (r.contentType === 'REVIEW') {
+          const rev = await prisma.review.findUnique({
+            where: { id: r.contentId },
+            include: {
+              author: { select: { firstName: true, lastName: true, email: true } },
+              professional: { include: { user: { select: { firstName: true, lastName: true } } } },
+            },
+          });
+          if (rev) content = {
+            text: rev.comment || '(sans commentaire)',
+            rating: rev.rating,
+            authorName: (rev.author.firstName || '') + ' ' + (rev.author.lastName || ''),
+            authorEmail: rev.author.email,
+            targetName: (rev.professional.user.firstName || '') + ' ' + (rev.professional.user.lastName || ''),
+          };
+        } else if (r.contentType === 'COMMENT') {
+          const com = await prisma.portfolioComment.findUnique({
+            where: { id: r.contentId },
+            include: { author: { select: { firstName: true, lastName: true, email: true } } },
+          });
+          if (com) content = {
+            text: com.content,
+            rating: com.rating,
+            authorName: (com.author.firstName || '') + ' ' + (com.author.lastName || ''),
+            authorEmail: com.author.email,
+          };
+        } else if (r.contentType === 'PORTFOLIO') {
+          const pp = await prisma.portfolioProject.findUnique({
+            where: { id: r.contentId },
+            include: { professional: { include: { user: { select: { firstName: true, lastName: true, email: true } } } } },
+          });
+          if (pp) content = {
+            text: pp.title + ' — ' + pp.description,
+            authorName: (pp.professional.user.firstName || '') + ' ' + (pp.professional.user.lastName || ''),
+            authorEmail: pp.professional.user.email,
+          };
+        }
+      } catch (_) {}
+      return { ...r, content };
+    }));
+
+    res.json({ reports: enriched, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/moderation/stats — compteurs par statut
+router.get('/moderation/stats', async (req, res, next) => {
+  try {
+    const [pending, dismissed, removed, byType] = await Promise.all([
+      prisma.contentReport.count({ where: { status: 'PENDING' } }),
+      prisma.contentReport.count({ where: { status: 'DISMISSED' } }),
+      prisma.contentReport.count({ where: { status: 'REMOVED' } }),
+      prisma.contentReport.groupBy({ by: ['contentType'], _count: { id: true } }),
+    ]);
+    res.json({
+      pending, dismissed, removed,
+      total: pending + dismissed + removed,
+      byType: Object.fromEntries(byType.map(b => [b.contentType, b._count.id])),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/moderation/reports/:id/dismiss — ignorer le signalement
+router.patch('/moderation/reports/:id/dismiss', async (req, res, next) => {
+  try {
+    const report = await prisma.contentReport.findUnique({ where: { id: req.params.id } });
+    if (!report) return res.status(404).json({ error: 'Signalement introuvable' });
+
+    await prisma.contentReport.update({
+      where: { id: req.params.id },
+      data: { status: 'DISMISSED', resolvedBy: req.user.id, resolvedAt: new Date() },
+    });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/moderation/reports/:id/remove — supprimer le contenu signalé
+router.patch('/moderation/reports/:id/remove', async (req, res, next) => {
+  try {
+    const report = await prisma.contentReport.findUnique({ where: { id: req.params.id } });
+    if (!report) return res.status(404).json({ error: 'Signalement introuvable' });
+
+    // Supprimer le contenu selon son type
+    try {
+      if (report.contentType === 'REVIEW') {
+        const rev = await prisma.review.findUnique({ where: { id: report.contentId } });
+        if (rev) {
+          await prisma.review.delete({ where: { id: report.contentId } });
+          // Recalculer la note moyenne du pro
+          const agg = await prisma.review.aggregate({
+            where: { professionalId: rev.professionalId },
+            _avg: { rating: true },
+            _count: true,
+          });
+          await prisma.professional.update({
+            where: { id: rev.professionalId },
+            data: { averageRating: agg._avg.rating || 0, reviewCount: agg._count },
+          });
+        }
+      } else if (report.contentType === 'COMMENT') {
+        await prisma.portfolioComment.delete({ where: { id: report.contentId } });
+      } else if (report.contentType === 'PORTFOLIO') {
+        await prisma.portfolioProject.delete({ where: { id: report.contentId } });
+      }
+    } catch (_) {
+      // Contenu déjà supprimé — on marque quand même le signalement
+    }
+
+    // Marquer tous les signalements pendants de ce contenu comme traités
+    await prisma.contentReport.updateMany({
+      where: { contentType: report.contentType, contentId: report.contentId, status: 'PENDING' },
+      data: { status: 'REMOVED', resolvedBy: req.user.id, resolvedAt: new Date() },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
 // ANALYTICS MÉTIER
 // ══════════════════════════════════════════════════════════════
 

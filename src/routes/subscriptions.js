@@ -189,10 +189,65 @@ router.get('/me', requireAuth, requireRole('PROFESSIONAL'), async (req, res, nex
   }
 });
 
+// Calculer le montant après promo
+function applyPromo(promo, baseAmount) {
+  if (!promo) return { discountAmount: 0, finalAmount: baseAmount };
+  let discountAmount = promo.discountType === 'PERCENT'
+    ? Math.round(baseAmount * promo.discountValue / 100)
+    : Math.min(promo.discountValue, baseAmount);
+  const finalAmount = Math.max(0, baseAmount - discountAmount);
+  return { discountAmount, finalAmount };
+}
+
+// Valider un code promo sans l'appliquer
+async function validatePromoForCheckout(code, tier, proId) {
+  const now = new Date();
+  const promo = await prisma.promoCode.findUnique({ where: { code: code.toUpperCase() } });
+  if (!promo) return { valid: false, error: 'Code promo invalide' };
+  if (!promo.active) return { valid: false, error: 'Code promo désactivé' };
+  if (promo.validUntil && promo.validUntil < now) return { valid: false, error: 'Code promo expiré' };
+  if (promo.validFrom > now) return { valid: false, error: 'Code promo pas encore actif' };
+  if (promo.maxUses !== null && promo.usedCount >= promo.maxUses) return { valid: false, error: 'Code promo épuisé' };
+  if (promo.applicableTiers.length > 0 && !promo.applicableTiers.includes(tier)) {
+    return { valid: false, error: `Code promo non applicable au plan ${tier}` };
+  }
+  const alreadyUsed = await prisma.promoUsage.findUnique({ where: { promoCodeId_professionalId: { promoCodeId: promo.id, professionalId: proId } } });
+  if (alreadyUsed) return { valid: false, error: 'Vous avez déjà utilisé ce code promo' };
+  return { valid: true, promo };
+}
+
+// POST /api/subscriptions/validate-promo
+router.post('/validate-promo', requireAuth, requireRole('PROFESSIONAL'), async (req, res, next) => {
+  try {
+    const { code, tier = 'ESSENTIEL' } = req.body;
+    if (!code) return res.status(400).json({ error: 'Code requis' });
+    const pro = await prisma.professional.findUnique({ where: { userId: req.user.id }, select: { id: true } });
+    const result = await validatePromoForCheckout(code, tier, pro.id);
+    if (!result.valid) return res.status(400).json({ error: result.error });
+
+    const prices = await getDynamicPrices();
+    const tierConfig = getTierConfig(tier, prices);
+    const { discountAmount, finalAmount } = applyPromo(result.promo, tierConfig.price);
+
+    res.json({
+      valid: true,
+      code: result.promo.code,
+      description: result.promo.description,
+      discountType: result.promo.discountType,
+      discountValue: result.promo.discountValue,
+      originalAmount: tierConfig.price,
+      discountAmount,
+      finalAmount,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/subscriptions/checkout
 router.post('/checkout', requireAuth, requireRole('PROFESSIONAL'), async (req, res, next) => {
   try {
-    const { tier = 'ESSENTIEL' } = req.body;
+    const { tier = 'ESSENTIEL', promoCode } = req.body;
     if (!TIERS[tier] || tier === 'GRATUIT') {
       return res.status(400).json({ error: 'Tier invalide' });
     }
@@ -202,6 +257,17 @@ router.post('/checkout', requireAuth, requireRole('PROFESSIONAL'), async (req, r
     const pro = await prisma.professional.findUnique({ where: { userId: req.user.id } });
     const transactionId = `sub-${tier.toLowerCase()}-${pro.id}-${Date.now()}`;
 
+    // Valider et appliquer le code promo si fourni
+    let promoData = null;
+    let finalAmount = tierConfig.price;
+    if (promoCode) {
+      const promoResult = await validatePromoForCheckout(promoCode, tier, pro.id);
+      if (!promoResult.valid) return res.status(400).json({ error: promoResult.error });
+      const applied = applyPromo(promoResult.promo, tierConfig.price);
+      promoData = { promo: promoResult.promo, ...applied };
+      finalAmount = applied.finalAmount;
+    }
+
     if (!isCinetPayConfigured) {
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       await prisma.subscription.upsert({
@@ -209,16 +275,32 @@ router.post('/checkout', requireAuth, requireRole('PROFESSIONAL'), async (req, r
         create: { professionalId: pro.id, tier, status: 'ACTIVE', transactionId, startedAt: new Date(), expiresAt },
         update: { tier, status: 'ACTIVE', transactionId, startedAt: new Date(), expiresAt },
       });
-      return res.json({ devMode: true, activated: true, tier, expiresAt });
+      // Enregistrer l'usage promo
+      if (promoData) {
+        await prisma.$transaction([
+          prisma.promoUsage.create({
+            data: {
+              promoCodeId: promoData.promo.id,
+              professionalId: pro.id,
+              tier,
+              originalAmount: tierConfig.price,
+              discountAmount: promoData.discountAmount,
+              finalAmount: promoData.finalAmount,
+            },
+          }),
+          prisma.promoCode.update({ where: { id: promoData.promo.id }, data: { usedCount: { increment: 1 } } }),
+        ]);
+      }
+      return res.json({ devMode: true, activated: true, tier, expiresAt, discount: promoData ? promoData.discountAmount : 0, finalAmount });
     }
 
     const { data } = await axios.post(CINETPAY_API_URL, {
       apikey: process.env.CINETPAY_API_KEY,
       site_id: process.env.CINETPAY_SITE_ID,
       transaction_id: transactionId,
-      amount: tierConfig.price,
+      amount: finalAmount,
       currency: 'XOF',
-      description: `Abonnement ${tierConfig.label} MANAWA - 1 mois`,
+      description: `Abonnement ${tierConfig.label} MANAWA - 1 mois${promoData ? ' (promo: ' + promoData.promo.code + ')' : ''}`,
       notify_url: `${process.env.BACKEND_PUBLIC_URL}/api/subscriptions/notify`,
       return_url: `${process.env.BACKEND_PUBLIC_URL}/api/subscriptions/return`,
       channels: 'MOBILE_MONEY',
@@ -232,6 +314,23 @@ router.post('/checkout', requireAuth, requireRole('PROFESSIONAL'), async (req, r
       create: { professionalId: pro.id, tier, status: 'INACTIVE', transactionId },
       update: { tier, transactionId },
     });
+
+    // Enregistrer l'usage promo (sera confirmé au webhook)
+    if (promoData) {
+      await prisma.$transaction([
+        prisma.promoUsage.create({
+          data: {
+            promoCodeId: promoData.promo.id,
+            professionalId: pro.id,
+            tier,
+            originalAmount: tierConfig.price,
+            discountAmount: promoData.discountAmount,
+            finalAmount: promoData.finalAmount,
+          },
+        }),
+        prisma.promoCode.update({ where: { id: promoData.promo.id }, data: { usedCount: { increment: 1 } } }),
+      ]);
+    }
 
     res.json({ devMode: false, paymentUrl: data.data.payment_url });
   } catch (err) {

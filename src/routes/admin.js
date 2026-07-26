@@ -2962,6 +2962,139 @@ router.patch('/reviews/:id/flag', async (req, res, next) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// CODES PROMO & OFFRES
+// ══════════════════════════════════════════════════════════════
+
+// GET /api/admin/promos/stats
+router.get('/promos/stats', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const [total, active, expired, totalUsages, topPromo] = await Promise.all([
+      prisma.promoCode.count(),
+      prisma.promoCode.count({ where: { active: true, OR: [{ validUntil: null }, { validUntil: { gt: now } }] } }),
+      prisma.promoCode.count({ where: { validUntil: { lt: now } } }),
+      prisma.promoUsage.count(),
+      prisma.promoCode.findFirst({
+        orderBy: { usedCount: 'desc' },
+        select: { code: true, usedCount: true, description: true },
+      }),
+    ]);
+    res.json({ total, active, expired, totalUsages, topPromo });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/promos — liste paginée
+router.get('/promos', async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = 20;
+    const skip = (page - 1) * limit;
+    const { search, status } = req.query;
+    const now = new Date();
+
+    const where = {};
+    if (search) where.OR = [
+      { code: { contains: search, mode: 'insensitive' } },
+      { description: { contains: search, mode: 'insensitive' } },
+    ];
+    if (status === 'active') where.active = true;
+    else if (status === 'inactive') where.active = false;
+    else if (status === 'expired') { where.validUntil = { lt: now }; }
+
+    const [promos, total] = await Promise.all([
+      prisma.promoCode.findMany({
+        where, skip, take: limit, orderBy: { createdAt: 'desc' },
+        include: { _count: { select: { usages: true } } },
+      }),
+      prisma.promoCode.count({ where }),
+    ]);
+
+    res.json({ promos, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/promos — créer un code
+router.post('/promos', async (req, res, next) => {
+  try {
+    const { code, description, discountType, discountValue, maxUses, validFrom, validUntil, applicableTiers, active } = req.body;
+    if (!code || !discountType || discountValue == null) return res.status(400).json({ error: 'code, discountType et discountValue sont requis' });
+    if (!['PERCENT', 'FIXED'].includes(discountType)) return res.status(400).json({ error: 'discountType doit être PERCENT ou FIXED' });
+    if (discountType === 'PERCENT' && (discountValue <= 0 || discountValue > 100)) return res.status(400).json({ error: 'Pourcentage invalide (1–100)' });
+
+    const promo = await prisma.promoCode.create({
+      data: {
+        code: code.toUpperCase().trim(),
+        description: description || null,
+        discountType,
+        discountValue: parseFloat(discountValue),
+        maxUses: maxUses ? parseInt(maxUses) : null,
+        validFrom: validFrom ? new Date(validFrom) : new Date(),
+        validUntil: validUntil ? new Date(validUntil) : null,
+        applicableTiers: Array.isArray(applicableTiers) ? applicableTiers : [],
+        active: active !== false,
+        createdBy: req.user.id,
+      },
+    });
+    res.status(201).json(promo);
+  } catch (err) {
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Ce code promo existe déjà' });
+    next(err);
+  }
+});
+
+// PATCH /api/admin/promos/:id — modifier
+router.patch('/promos/:id', async (req, res, next) => {
+  try {
+    const { description, discountType, discountValue, maxUses, validFrom, validUntil, applicableTiers, active } = req.body;
+    const data = {};
+    if (description !== undefined) data.description = description;
+    if (discountType !== undefined) data.discountType = discountType;
+    if (discountValue !== undefined) data.discountValue = parseFloat(discountValue);
+    if (maxUses !== undefined) data.maxUses = maxUses ? parseInt(maxUses) : null;
+    if (validFrom !== undefined) data.validFrom = new Date(validFrom);
+    if (validUntil !== undefined) data.validUntil = validUntil ? new Date(validUntil) : null;
+    if (applicableTiers !== undefined) data.applicableTiers = Array.isArray(applicableTiers) ? applicableTiers : [];
+    if (active !== undefined) data.active = active;
+
+    const promo = await prisma.promoCode.update({ where: { id: req.params.id }, data });
+    res.json(promo);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Code promo non trouvé' });
+    next(err);
+  }
+});
+
+// DELETE /api/admin/promos/:id — supprimer
+router.delete('/promos/:id', async (req, res, next) => {
+  try {
+    await prisma.promoCode.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Code promo non trouvé' });
+    next(err);
+  }
+});
+
+// GET /api/admin/promos/:id/usages — historique d'utilisation
+router.get('/promos/:id/usages', async (req, res, next) => {
+  try {
+    const usages = await prisma.promoUsage.findMany({
+      where: { promoCodeId: req.params.id },
+      orderBy: { usedAt: 'desc' },
+      include: {
+        professional: {
+          select: {
+            trade: true,
+            user: { select: { firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+    });
+    res.json(usages);
+  } catch (err) { next(err); }
+});
+
+// ══════════════════════════════════════════════════════════════
 // PORTFOLIOS & RÉALISATIONS
 // ══════════════════════════════════════════════════════════════
 

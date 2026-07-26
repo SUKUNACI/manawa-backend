@@ -84,6 +84,7 @@ model Professional {
   companyCode             String?         @unique
   companyMembers          CompanyMember[] @relation("CompanyMembers")
   memberOf                CompanyMember?  @relation("MemberOf")
+  promoUsages             PromoUsage[]
   followers               Follow[]
   portfolio               PortfolioItem[]
   portfolioProjects       PortfolioProject[] @relation("PortfolioProjects")
@@ -505,6 +506,39 @@ model AppConfig {
   description String?
   updatedBy   String?
   updatedAt   DateTime @updatedAt
+}
+
+model PromoCode {
+  id              String       @id @default(uuid())
+  code            String       @unique
+  description     String?
+  discountType    String       // 'PERCENT' | 'FIXED'
+  discountValue   Float
+  maxUses         Int?
+  usedCount       Int          @default(0)
+  validFrom       DateTime     @default(now())
+  validUntil      DateTime?
+  applicableTiers String[]     @default([])
+  active          Boolean      @default(true)
+  createdBy       String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  usages          PromoUsage[]
+}
+
+model PromoUsage {
+  id             String       @id @default(uuid())
+  promoCodeId    String
+  professionalId String
+  tier           String
+  originalAmount Float
+  discountAmount Float
+  finalAmount    Float
+  usedAt         DateTime     @default(now())
+  promoCode      PromoCode    @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  professional   Professional @relation(fields: [professionalId], references: [id])
+
+  @@unique([promoCodeId, professionalId])
 }
 
 model Dispute {

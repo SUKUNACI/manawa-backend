@@ -240,6 +240,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   <div class="nav-item" onclick="showPage('clients',this)"><span class="ni">👥</span> Clients</div>
   <div class="nav-item" onclick="showPage('projects',this)"><span class="ni">📋</span> Projets</div>
   <div class="nav-item" onclick="showPage('payments',this)"><span class="ni">💰</span> Paiements</div>
+  <div class="nav-item" onclick="showPage('audit',this)"><span class="ni">📜</span> Journal d'audit</div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
     <span class="nav-badge orange" id="badge-support" style="display:none;">0</span>
@@ -457,7 +458,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Montant</th><th>Statut</th><th>Professionnel</th><th>Projet</th><th>Date</th></tr></thead>
+          <thead><tr><th>ID</th><th>Montant</th><th>Type</th><th>Statut</th><th>Professionnel</th><th>Projet</th><th>Date</th><th>Actions</th></tr></thead>
           <tbody id="payments-tbody"></tbody>
         </table>
       </div>
@@ -469,6 +470,47 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
         <button class="btn btn-view" id="pay-prev" onclick="loadPayments(payCurrentPage-1)">← Précédent</button>
         <span class="page-info" id="pay-page-info"></span>
         <button class="btn btn-view" id="pay-next" onclick="loadPayments(payCurrentPage+1)">Suivant →</button>
+      </div>
+    </div>
+
+    <!-- ══ PAGE: JOURNAL D'AUDIT ══ -->
+    <div class="page" id="page-audit">
+      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">
+        <div class="kpi blue"><div class="kpi-icon">📜</div><div class="kpi-val" id="audit-total">--</div><div class="kpi-label">Entrées total</div></div>
+        <div class="kpi green"><div class="kpi-icon">✅</div><div class="kpi-val" id="audit-succeeded">--</div><div class="kpi-label">Confirmations</div></div>
+        <div class="kpi red"><div class="kpi-icon">⚠️</div><div class="kpi-val" id="audit-mismatches">--</div><div class="kpi-label">Anomalies montant</div></div>
+      </div>
+      <div class="filters">
+        <select class="filter-select" id="audit-trigger-filter" onchange="loadAuditLogs(1)">
+          <option value="">Tous les déclencheurs</option>
+          <option value="webhook">Webhook</option>
+          <option value="cron_expiry">Cron expiry</option>
+          <option value="reconciliation">Réconciliation</option>
+          <option value="manual">Manuel</option>
+          <option value="system">Système</option>
+        </select>
+        <select class="filter-select" id="audit-reason-filter" onchange="loadAuditLogs(1)">
+          <option value="">Toutes les raisons</option>
+          <option value="cron_expiry">Expiration cron</option>
+          <option value="reconciliation">Réconciliation</option>
+          <option value="amount_mismatch">Anomalie montant</option>
+          <option value="webhook_confirmed">Webhook confirmé</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Paiement</th><th>Projet</th><th>Type</th><th>Montant</th><th>De → Vers</th><th>Raison</th><th>Déclenché par</th></tr></thead>
+          <tbody id="audit-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="audit-empty" style="display:none;">
+        <div class="es-icon">📜</div>
+        <p>Aucune entrée dans le journal</p>
+      </div>
+      <div class="pagination" id="audit-pagination" style="display:none;">
+        <button class="btn btn-view" id="audit-prev" onclick="loadAuditLogs(auditCurrentPage-1)">← Précédent</button>
+        <span class="page-info" id="audit-page-info"></span>
+        <button class="btn btn-view" id="audit-next" onclick="loadAuditLogs(auditCurrentPage+1)">Suivant →</button>
       </div>
     </div>
 
@@ -581,6 +623,7 @@ let currentPage = 'dashboard';
 let prosCurrentPage = 1;
 let clientsCurrentPage = 1;
 let payCurrentPage = 1;
+let auditCurrentPage = 1;
 let currentRejectProId = null;
 let prosDebounceTimer = null;
 let clientsDebounceTimer = null;
@@ -593,6 +636,7 @@ const titles = {
   clients: 'Clients',
   projects: 'Projets',
   payments: 'Paiements',
+  audit: 'Journal d\'audit',
   support: 'Support',
   deleted: 'Comptes supprimés'
 };
@@ -727,6 +771,7 @@ function showPage(id, el) {
     case 'clients': loadClients(1); break;
     case 'projects': loadProjects(1); break;
     case 'payments': loadPayments(1); loadPaymentStats(); break;
+    case 'audit': loadAuditLogs(1); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
   }
@@ -1512,12 +1557,17 @@ async function loadPayments(page) {
     emptyEl.style.display = 'none';
     tbody.innerHTML = data.payments.map(pay => {
       const statusBadge = getPaymentStatusBadge(pay.status);
+      const typeBadge = pay.isDeposit
+        ? '<span class="badge badge-orange">Acompte 30%</span>'
+        : pay.isDeposit === false
+          ? '<span class="badge badge-blue">Solde 70%</span>'
+          : '<span class="badge badge-muted">-</span>';
       const proName = pay.quote && pay.quote.professional && pay.quote.professional.user
         ? (pay.quote.professional.user.firstName + ' ' + pay.quote.professional.user.lastName)
         : '-';
       const projectTitle = pay.quote && pay.quote.project ? pay.quote.project.title : '-';
 
-      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(pay.id) + '" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + escAttr(pay.id) + '\');showToast(\'ID copié\')">' + escHtml(pay.id.substring(0, 6)) + '</span></td><td style="color:var(--orange);font-weight:600">' + formatNumber(pay.amount) + ' FCFA</td><td>' + statusBadge + '</td><td>' + escHtml(proName) + '</td><td>' + escHtml(projectTitle) + '</td><td>' + formatDate(pay.createdAt) + '</td></tr>';
+      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(pay.id) + '" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + escAttr(pay.id) + '\');showToast(\'ID copié\')">' + escHtml(pay.id.substring(0, 6)) + '</span></td><td style="color:var(--orange);font-weight:600">' + formatNumber(pay.amount) + ' FCFA</td><td>' + typeBadge + '</td><td>' + statusBadge + '</td><td>' + escHtml(proName) + '</td><td>' + escHtml(projectTitle) + '</td><td>' + formatDate(pay.createdAt) + '</td><td class="td-actions"><button class="btn btn-view" onclick="viewPaymentAuditLog(\'' + escAttr(pay.id) + '\')" title="Journal audit">📜</button></td></tr>';
     }).join('');
 
     // Pagination
@@ -1534,6 +1584,118 @@ async function loadPayments(page) {
     if (err.message !== 'Unauthorized') {
       console.error('Payments error:', err);
     }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// JOURNAL D'AUDIT
+// ══════════════════════════════════════════════════════════════
+async function loadAuditLogs(page = 1) {
+  auditCurrentPage = page;
+  const triggeredBy = document.getElementById('audit-trigger-filter').value;
+  const reason = document.getElementById('audit-reason-filter').value;
+
+  let url = '/admin/audit-logs?page=' + page + '&limit=30';
+  if (triggeredBy) url += '&triggeredBy=' + encodeURIComponent(triggeredBy);
+  if (reason) url += '&reason=' + encodeURIComponent(reason);
+
+  try {
+    const data = await apiCall(url);
+    const tbody = document.getElementById('audit-tbody');
+    const emptyEl = document.getElementById('audit-empty');
+    const paginationEl = document.getElementById('audit-pagination');
+
+    // KPIs
+    document.getElementById('audit-total').textContent = formatNumber(data.pagination.total);
+    const succeeded = (data.logs || []).filter(l => l.toStatus === 'succeeded').length;
+    const mismatches = (data.logs || []).filter(l => l.reason === 'amount_mismatch').length;
+    document.getElementById('audit-succeeded').textContent = succeeded;
+    document.getElementById('audit-mismatches').textContent = mismatches;
+
+    if (!data.logs || data.logs.length === 0) {
+      tbody.innerHTML = '';
+      emptyEl.style.display = 'block';
+      paginationEl.style.display = 'none';
+      return;
+    }
+
+    emptyEl.style.display = 'none';
+    tbody.innerHTML = data.logs.map(log => {
+      const pay = log.payment;
+      const projectTitle = pay && pay.quote && pay.quote.project ? escHtml(pay.quote.project.title) : '-';
+      const proName = pay && pay.quote && pay.quote.professional && pay.quote.professional.user
+        ? escHtml(pay.quote.professional.user.firstName + ' ' + pay.quote.professional.user.lastName)
+        : '-';
+      const typeBadge = pay
+        ? (pay.isDeposit ? '<span class="badge badge-orange" style="font-size:10px;">Acompte</span>' : '<span class="badge badge-blue" style="font-size:10px;">Solde</span>')
+        : '-';
+      const amount = pay ? formatNumber(pay.amount) + ' FCFA' : '-';
+      const fromBadge = getPaymentStatusBadge(log.fromStatus);
+      const toBadge = getPaymentStatusBadge(log.toStatus);
+      const triggerBadge = log.triggeredBy === 'webhook' ? '<span class="badge badge-blue" style="font-size:10px;">webhook</span>'
+        : log.triggeredBy === 'cron_expiry' || log.triggeredBy === 'cron' ? '<span class="badge badge-yellow" style="font-size:10px;">cron</span>'
+        : log.triggeredBy === 'reconciliation' ? '<span class="badge badge-muted" style="font-size:10px;">réconcil.</span>'
+        : '<span class="badge badge-muted" style="font-size:10px;">' + escHtml(log.triggeredBy || 'système') + '</span>';
+      const reasonText = log.reason ? escHtml(log.reason.replace(/_/g, ' ')) : '-';
+      const payId = pay ? '<span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" onclick="navigator.clipboard.writeText(\'' + escAttr(pay.id) + '\');showToast(\'ID copié\')" title="' + escAttr(pay.id) + '">' + escHtml(pay.id.substring(0, 6)) + '</span>' : '-';
+      return '<tr>'
+        + '<td style="white-space:nowrap;font-size:12px;">' + formatDate(log.createdAt) + '</td>'
+        + '<td>' + payId + '</td>'
+        + '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + projectTitle + '<br><span style="font-size:11px;color:var(--muted);">' + proName + '</span></td>'
+        + '<td>' + typeBadge + '</td>'
+        + '<td style="color:var(--orange);font-weight:600;white-space:nowrap;">' + amount + '</td>'
+        + '<td style="white-space:nowrap;">' + fromBadge + ' → ' + toBadge + '</td>'
+        + '<td style="font-size:12px;color:var(--muted);">' + reasonText + '</td>'
+        + '<td>' + triggerBadge + '</td>'
+        + '</tr>';
+    }).join('');
+
+    const pagination = data.pagination;
+    if (pagination && pagination.totalPages > 1) {
+      paginationEl.style.display = 'flex';
+      document.getElementById('audit-page-info').textContent = 'Page ' + pagination.page + ' / ' + pagination.totalPages + ' (' + pagination.total + ' entrées)';
+      document.getElementById('audit-prev').disabled = pagination.page <= 1;
+      document.getElementById('audit-next').disabled = pagination.page >= pagination.totalPages;
+    } else {
+      paginationEl.style.display = 'none';
+    }
+  } catch (err) {
+    if (err.message !== 'Unauthorized') console.error('Audit logs error:', err);
+  }
+}
+
+async function viewPaymentAuditLog(paymentId) {
+  try {
+    const data = await apiCall('/admin/payments/' + paymentId + '/audit-logs');
+    if (!data.logs || data.logs.length === 0) {
+      showToast('Aucun journal d\'audit pour ce paiement');
+      return;
+    }
+    let html = '<div style="max-height:400px;overflow-y:auto;">';
+    data.logs.forEach(log => {
+      const fromBadge = getPaymentStatusBadge(log.fromStatus);
+      const toBadge = getPaymentStatusBadge(log.toStatus);
+      html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">';
+      html += '<div style="display:flex;gap:6px;align-items:center;">' + fromBadge + '<span style="color:var(--muted);">→</span>' + toBadge + '</div>';
+      html += '<span style="font-size:11px;color:var(--muted);">' + formatDate(log.createdAt) + '</span>';
+      html += '</div>';
+      if (log.reason) html += '<p style="font-size:12px;color:var(--light);margin-bottom:4px;">Raison : ' + escHtml(log.reason.replace(/_/g, ' ')) + '</p>';
+      if (log.triggeredBy) html += '<p style="font-size:11px;color:var(--muted);">Déclenché par : ' + escHtml(log.triggeredBy) + '</p>';
+      if (log.metadata) {
+        try {
+          const meta = JSON.parse(log.metadata);
+          if (meta.expected !== undefined) html += '<p style="font-size:11px;color:var(--red);margin-top:4px;">⚠️ Attendu : ' + formatNumber(meta.expected) + ' FCFA — Reçu : ' + formatNumber(meta.received) + ' FCFA</p>';
+        } catch(e) {}
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    document.getElementById('mp-title').textContent = 'Journal d\'audit — paiement ' + paymentId.substring(0, 8);
+    document.getElementById('mp-content').innerHTML = html;
+    document.getElementById('modal-project').classList.add('show');
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
   }
 }
 

@@ -88,8 +88,13 @@ async function testGeniusPay() {
     console.log('6️⃣  Tester vérification signature webhook...');
     const testTimestamp = Math.floor(Date.now() / 1000);
     const testPayload = { id: 123, status: 'completed' };
+    const secret = process.env.GENIUSPAY_WEBHOOK_SECRET;
+    if (!secret) {
+      console.log('   ⚠️  GENIUSPAY_WEBHOOK_SECRET non défini — test de signature ignoré\n');
+      return;
+    }
     const testSignature = require('crypto')
-      .createHmac('sha256', process.env.GENIUSPAY_WEBHOOK_SECRET || 'whsec_test')
+      .createHmac('sha256', secret)
       .update(`${testTimestamp}.${JSON.stringify(testPayload)}`)
       .digest('hex');
 

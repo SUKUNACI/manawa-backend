@@ -1,30 +1,44 @@
 const express = require('express');
+const { body, validationResult } = require('express-validator');
 const prisma = require('../config/db');
 const upload = require('../config/upload');
+const { verifyMagicBytes } = require('../config/upload');
 const { uploadBuffer } = require('../config/cloudinary');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
 // PATCH /api/users/me
-router.patch('/me', requireAuth, async (req, res, next) => {
-  try {
-    const { firstName, lastName, phone, city } = req.body;
+router.patch('/me',
+  requireAuth,
+  [
+    body('firstName').optional().trim().notEmpty().isLength({ max: 50 }).escape(),
+    body('lastName').optional().trim().notEmpty().isLength({ max: 50 }).escape(),
+    body('phone').optional({ nullable: true }).trim().matches(/^\+?[0-9\s\-().]{6,20}$/),
+    body('city').optional({ nullable: true }).trim().isLength({ max: 100 }).escape(),
+  ],
+  async (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
 
-    const nameFields = req.user.role === 'PROFESSIONAL' ? {} : { firstName, lastName };
+    try {
+      const { firstName, lastName, phone, city } = req.body;
 
-    const user = await prisma.user.update({
-      where: { id: req.user.id },
-      data: { ...nameFields, phone, city },
-      include: { professional: true },
-    });
+      const nameFields = req.user.role === 'PROFESSIONAL' ? {} : { firstName, lastName };
 
-    const { passwordHash: _, ...userSafe } = user;
-    res.json(userSafe);
-  } catch (err) {
-    next(err);
+      const user = await prisma.user.update({
+        where: { id: req.user.id },
+        data: { ...nameFields, phone, city },
+        include: { professional: true },
+      });
+
+      const { passwordHash: _, ...userSafe } = user;
+      res.json(userSafe);
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 // GET /api/users/me/recently-viewed
 router.get('/me/recently-viewed', requireAuth, async (req, res, next) => {
@@ -62,7 +76,7 @@ router.get('/me/following', requireAuth, async (req, res, next) => {
 });
 
 // POST /api/users/me/avatar
-router.post('/me/avatar', requireAuth, upload.single('avatar'), async (req, res, next) => {
+router.post('/me/avatar', requireAuth, upload.single('avatar'), verifyMagicBytes, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Photo requise' });
     const avatarUrl = await uploadBuffer(req.file.buffer, 'manawa/avatars');

@@ -16,6 +16,12 @@ jest.mock('../src/config/db', () => ({
     deleteMany: jest.fn(),
     create: jest.fn(),
   },
+  refreshToken: {
+    create:     jest.fn().mockResolvedValue({ token: 'mock-refresh-token' }),
+    findUnique: jest.fn(),
+    deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    delete:     jest.fn(),
+  },
 }));
 
 const prisma = require('../src/config/db');

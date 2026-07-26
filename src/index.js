@@ -37,15 +37,22 @@ const disputeRoutes = require('./routes/disputes');
 const { initializeFirebase, getMessaging } = require('./config/firebase-admin');
 const { setMessaging } = require('./config/pushNotifications');
 
+const helmet = require('helmet');
+
+const cookieParser = require('cookie-parser');
+
 const app = express();
 const server = http.createServer(app);
+app.use(cookieParser());
 
 const allowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',')
   : ['http://localhost:8081', 'http://localhost:19006'];
 
 app.set('trust proxy', 1);
-app.use(cors({ origin: allowedOrigins }));
+app.disable('x-powered-by');
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 // Initialize Firebase
 const firebaseApp = initializeFirebase();
@@ -92,15 +99,40 @@ app.use('/api/quotes', quoteRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/payments', paymentRoutes);
-app.use('/api/admin', adminRoutes);
+// Injecte le cookie httpOnly adminToken comme Bearer header pour les routes /api/admin
+// Le JWT ne transite plus par localStorage — résiste au vol XSS
+app.use('/api/admin', (req, res, next) => {
+  const cookieToken = req.cookies?.adminToken;
+  if (cookieToken && !req.headers.authorization) {
+    req.headers.authorization = `Bearer ${cookieToken}`;
+  }
+  next();
+}, adminRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/portfolio-projects', portfolioProjectsRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/disputes', disputeRoutes);
 
-// Panel d'administration (interface web)
-app.use('/admin', express.static(require('path').join(__dirname, '../admin-panel')));
+// Panel d'administration — seul login.html est public
+// Le dashboard (index.html, 400KB+) est servi uniquement après vérification du cookie httpOnly
+const adminPanelAuth = (req, res, next) => {
+  // Seule la page de login est publique
+  if (req.path === '/login.html' || req.path === '/login') return next();
+
+  // Toute autre requête (y compris /) requiert le cookie httpOnly posé au login
+  const token = req.cookies?.adminToken;
+  if (!token) return res.redirect('/admin/login.html');
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.role !== 'ADMIN') return res.redirect('/admin/login.html');
+    next();
+  } catch {
+    return res.redirect('/admin/login.html');
+  }
+};
+
+app.use('/admin', adminPanelAuth, express.static(require('path').join(__dirname, '../admin-panel')));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
@@ -119,11 +151,26 @@ io.use((socket, next) => {
   }
 });
 
+// Rate limit Socket.IO : 60 messages/min par userId
+const socketMessageCounts = new Map();
+function isSocketRateLimited(userId) {
+  const now = Date.now();
+  const entry = socketMessageCounts.get(userId) || { count: 0, resetAt: now + 60000 };
+  if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + 60000; }
+  entry.count++;
+  socketMessageCounts.set(userId, entry);
+  return entry.count > 60;
+}
+
 io.on('connection', (socket) => {
   onlineUsers.set(socket.userId, socket.id);
 
   socket.on('send_message', (message) => {
     if (message.senderId !== socket.userId) return;
+    if (isSocketRateLimited(socket.userId)) {
+      socket.emit('error', { message: 'Trop de messages, réessayez dans une minute' });
+      return;
+    }
     const receiverSocket = onlineUsers.get(message.receiverId);
     if (receiverSocket) {
       io.to(receiverSocket).emit('receive_message', message);
@@ -168,6 +215,21 @@ async function expireQuotes() {
 
 setInterval(expireQuotes, 60 * 60 * 1000);
 expireQuotes();
+
+// Nettoyage des refresh tokens expirés (toutes les 24h)
+async function cleanExpiredRefreshTokens() {
+  try {
+    const { count } = await prisma.refreshToken.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
+    });
+    if (count > 0) console.log(`[CRON] ${count} refresh token(s) expiré(s) supprimé(s)`);
+  } catch (err) {
+    console.error('[CRON] Erreur nettoyage refresh tokens:', err.message);
+  }
+}
+
+setInterval(cleanExpiredRefreshTokens, 24 * 60 * 60 * 1000);
+cleanExpiredRefreshTokens();
 
 // Expiration automatique des paiements pending depuis plus de 1h
 const { logPaymentStatus } = require('./utils/paymentAudit');

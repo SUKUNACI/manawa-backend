@@ -106,8 +106,20 @@ router.get('/mine', requireAuth, requireRole('CLIENT'), async (req, res, next) =
 // GET /api/disputes/:id — détail d'un litige
 router.get('/:id', requireAuth, async (req, res, next) => {
   try {
-    const dispute = await prisma.dispute.findUnique({
-      where: { id: req.params.id },
+    const userId = req.user.id;
+    const role = req.user.role;
+
+    let whereClause = { id: req.params.id };
+    if (role === 'CLIENT') {
+      whereClause.clientId = userId;
+    } else if (role === 'PROFESSIONAL') {
+      whereClause.payment = { quote: { professional: { userId } } };
+    } else if (role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    const dispute = await prisma.dispute.findFirst({
+      where: whereClause,
       include: {
         payment: {
           include: {
@@ -126,14 +138,6 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     });
 
     if (!dispute) return res.status(404).json({ error: 'Litige introuvable' });
-
-    const isClient = dispute.clientId === req.user.id;
-    const isPro = dispute.payment.quote.professional.user.id === req.user.id;
-    const isAdmin = req.user.role === 'ADMIN';
-
-    if (!isClient && !isPro && !isAdmin) {
-      return res.status(403).json({ error: 'Accès refusé' });
-    }
 
     res.json(dispute);
   } catch (err) {

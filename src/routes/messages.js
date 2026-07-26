@@ -1,12 +1,21 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
 const { requireAuth } = require('../middleware/auth');
 const { sendPushNotification } = require('../config/pushNotifications');
 
 const router = express.Router();
 
+// 60 messages max par heure par utilisateur
+const messageLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Trop de messages envoyés, réessayez dans une heure' },
+});
+
 // POST /api/messages
-router.post('/', requireAuth, async (req, res, next) => {
+router.post('/', requireAuth, messageLimiter, async (req, res, next) => {
   try {
     const { receiverId, content } = req.body;
     if (!receiverId || !content || !content.trim()) {

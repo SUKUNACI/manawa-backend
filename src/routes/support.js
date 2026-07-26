@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
 const { requireAuth } = require('../middleware/auth');
 const { sendPushNotification } = require('../config/pushNotifications');
@@ -6,6 +7,21 @@ const { sendPushNotification } = require('../config/pushNotifications');
 const router = express.Router();
 
 router.use(requireAuth);
+
+// 5 tickets max par heure, 20 messages par heure
+const createTicketLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Trop de tickets créés, réessayez dans une heure' },
+});
+
+const ticketMessageLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Trop de messages envoyés, réessayez dans une heure' },
+});
 
 // GET /api/support/tickets — mes tickets
 router.get('/tickets', async (req, res, next) => {
@@ -24,7 +40,7 @@ router.get('/tickets', async (req, res, next) => {
 });
 
 // POST /api/support/tickets — créer un ticket
-router.post('/tickets', async (req, res, next) => {
+router.post('/tickets', createTicketLimiter, async (req, res, next) => {
   try {
     const { category, subject, message } = req.body;
     if (!category || !subject || !message) {
@@ -66,7 +82,7 @@ router.get('/tickets/:id', async (req, res, next) => {
 });
 
 // POST /api/support/tickets/:id/messages — répondre à un ticket
-router.post('/tickets/:id/messages', async (req, res, next) => {
+router.post('/tickets/:id/messages', ticketMessageLimiter, async (req, res, next) => {
   try {
     const ticket = await prisma.supportTicket.findFirst({
       where: { id: req.params.id, userId: req.user.id },

@@ -1,16 +1,26 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { getActiveTier, getTierConfig } = require('./subscriptions');
 const { sendPushNotification } = require('../config/pushNotifications');
 const geniuspay = require('../utils/geniuspay');
 const upload = require('../config/upload');
+const { verifyMagicBytes } = require('../config/upload');
 const { uploadBuffer } = require('../config/cloudinary');
 
 const router = express.Router();
 
+// 10 projets max par heure par utilisateur
+const createProjectLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Trop de projets créés, réessayez dans une heure' },
+});
+
 // POST /api/projects
-router.post('/', requireAuth, requireRole('CLIENT'), async (req, res, next) => {
+router.post('/', requireAuth, requireRole('CLIENT'), createProjectLimiter, async (req, res, next) => {
   try {
     const { title, description, tradeNeeded, budgetMin, budgetMax, city, latitude, longitude, photos } = req.body;
 
@@ -119,7 +129,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
         client: { select: { firstName: true, lastName: true, city: true, phone: true } },
         quotes: {
           include: {
-            professional: { include: { user: true } },
+            professional: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, avatarUrl: true } } } },
             items: { orderBy: { sortOrder: 'asc' } },
             payments: { select: { id: true, status: true, isDeposit: true, geniuspayRef: true } },
           },
@@ -129,6 +139,14 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       },
     });
     if (!project) return res.status(404).json({ error: 'Projet introuvable' });
+
+    // Seul le client propriétaire ou un professionnel ayant soumis un devis peut voir ce projet
+    const isOwner = project.clientId === req.user.id;
+    const isInvolvedPro = project.quotes.some(q => q.professional?.user?.id === req.user.id);
+    const isAdmin = req.user.role === 'ADMIN';
+    if (!isOwner && !isInvolvedPro && !isAdmin) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
 
     // Re-vérifier les paiements pending chez GeniusPay (webhook peut avoir manqué)
     for (const quote of project.quotes) {
@@ -278,7 +296,7 @@ router.patch('/:id/cancel', requireAuth, requireRole('CLIENT'), async (req, res,
 });
 
 // POST /api/projects/:id/photos — Upload photos to an existing project
-router.post('/:id/photos', requireAuth, requireRole('CLIENT'), upload.array('photos', 5), async (req, res, next) => {
+router.post('/:id/photos', requireAuth, requireRole('CLIENT'), upload.array('photos', 5), verifyMagicBytes, async (req, res, next) => {
   try {
     const project = await prisma.project.findUnique({ where: { id: req.params.id } });
     if (!project || project.clientId !== req.user.id) {

@@ -1,6 +1,7 @@
 const express = require('express');
 const prisma = require('../config/db');
 const upload = require('../config/upload');
+const { verifyMagicBytes } = require('../config/upload');
 const { uploadBuffer } = require('../config/cloudinary');
 const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const { computeTrustScore, getTrustScoreBreakdown } = require('../utils/trustScore');
@@ -179,7 +180,7 @@ router.patch('/me', requireAuth, requireRole('PROFESSIONAL'), async (req, res, n
 });
 
 // POST /api/professionals/me/portfolio
-router.post('/me/portfolio', requireAuth, requireRole('PROFESSIONAL'), upload.single('photo'), async (req, res, next) => {
+router.post('/me/portfolio', requireAuth, requireRole('PROFESSIONAL'), upload.single('photo'), verifyMagicBytes, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Photo requise' });
     const pro = await prisma.professional.findUnique({ where: { userId: req.user.id }, include: { portfolio: true, subscription: true } });
@@ -486,7 +487,7 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
     const pro = await prisma.professional.findUnique({
       where: { id: req.params.id },
       include: {
-        user: true,
+        user: { select: { id: true, firstName: true, lastName: true, email: true, city: true, avatarUrl: true, phoneVerified: true, emailVerified: true, createdAt: true } },
         portfolio: { include: { likes: true } },
         reviews: { include: { author: { select: { firstName: true, lastName: true } } } },
         followers: true,

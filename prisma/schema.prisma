@@ -47,6 +47,18 @@ model User {
   pushTokens          PushToken[]
   notifications       Notification[]
   disputes            Dispute[]
+  refreshTokens       RefreshToken[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Professional {

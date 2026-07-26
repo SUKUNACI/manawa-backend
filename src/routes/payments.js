@@ -317,8 +317,8 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
   }
 });
 
-// GET /api/payments/ping-geniuspay — test connectivité + création paiement test
-router.get('/ping-geniuspay', async (req, res) => {
+// GET /api/payments/ping-geniuspay — test connectivité + création paiement test (admin only)
+router.get('/ping-geniuspay', requireAuth, requireRole('ADMIN'), async (req, res) => {
   const axios = require('axios');
   try {
     // Test 1 : account
@@ -350,8 +350,8 @@ router.get('/ping-geniuspay', async (req, res) => {
 
 // GET /api/payments/success — redirige vers l'app via deep link
 router.get('/success', (req, res) => {
-  const { quoteId } = req.query;
-  const deepLink = `manawa://payment/success?quoteId=${quoteId || ''}`;
+  const quoteId = (req.query.quoteId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  const deepLink = `manawa://payment/success?quoteId=${quoteId}`;
   res.send(`
     <html>
       <head>
@@ -383,8 +383,8 @@ router.get('/success', (req, res) => {
 
 // GET /api/payments/error — redirige vers l'app via deep link
 router.get('/error', (req, res) => {
-  const { quoteId } = req.query;
-  const deepLink = `manawa://payment/error?quoteId=${quoteId || ''}`;
+  const quoteId = (req.query.quoteId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  const deepLink = `manawa://payment/error?quoteId=${quoteId}`;
   res.send(`
     <html>
       <head>
@@ -453,8 +453,8 @@ router.get('/status/:quoteId', requireAuth, async (req, res, next) => {
   }
 });
 
-// GET /api/payments/check/:reference
-router.get('/check/:reference', requireAuth, async (req, res, next) => {
+// GET /api/payments/check/:reference (admin only)
+router.get('/check/:reference', requireAuth, requireRole('ADMIN'), async (req, res, next) => {
   try {
     const geniuspayData = await geniuspay.getPayment(req.params.reference);
     res.json(geniuspayData);

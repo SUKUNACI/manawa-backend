@@ -1,11 +1,20 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
+// 10 avis max par heure par utilisateur
+const createReviewLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Trop d\'avis postés, réessayez dans une heure' },
+});
+
 // POST /api/reviews
-router.post('/', requireAuth, requireRole('CLIENT'), async (req, res, next) => {
+router.post('/', requireAuth, requireRole('CLIENT'), createReviewLimiter, async (req, res, next) => {
   try {
     const { professionalId, rating, comment, projectId } = req.body;
 

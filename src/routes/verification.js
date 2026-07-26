@@ -14,8 +14,10 @@ const otpLimiter = rateLimit({
   message: { error: 'Trop de demandes de code, réessayez dans 15 minutes' },
 });
 
+const { randomInt } = require('crypto');
+
 function generateCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return randomInt(100000, 1000000).toString();
 }
 
 // POST /api/verification/email/send
@@ -130,8 +132,8 @@ router.post('/password/request-reset', otpLimiter, async (req, res, next) => {
 router.post('/password/reset', otpLimiter, async (req, res, next) => {
   try {
     const { email, code, newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caractères' });
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({ error: 'Le mot de passe doit faire au moins 8 caractères' });
     }
 
     const user = await prisma.user.findUnique({ where: { email } });

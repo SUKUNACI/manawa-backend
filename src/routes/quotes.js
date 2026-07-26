@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { sendPushNotification } = require('../config/pushNotifications');
@@ -7,8 +8,16 @@ const { getActiveTier, getTierConfig } = require('./subscriptions');
 
 const router = express.Router();
 
+// 20 devis max par heure par professionnel
+const createQuoteLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Trop de devis envoyés, réessayez dans une heure' },
+});
+
 // POST /api/quotes — Créer un devis (simple ou détaillé)
-router.post('/', requireAuth, requireRole('PROFESSIONAL'), async (req, res, next) => {
+router.post('/', requireAuth, requireRole('PROFESSIONAL'), createQuoteLimiter, async (req, res, next) => {
   try {
     const { projectId, amount, description, mode, items, validityDays } = req.body;
 
@@ -220,15 +229,21 @@ router.post('/:id/revise', requireAuth, requireRole('PROFESSIONAL'), async (req,
 // GET /api/quotes/:id/history — Historique des versions d'un devis
 router.get('/:id/history', requireAuth, async (req, res, next) => {
   try {
-    const quote = await prisma.quote.findUnique({ where: { id: req.params.id } });
+    const quote = await prisma.quote.findUnique({
+      where: { id: req.params.id },
+      include: { project: { select: { clientId: true } }, professional: { include: { user: { select: { id: true } } } } },
+    });
     if (!quote) return res.status(404).json({ error: 'Devis introuvable' });
 
-    // Trouver toutes les versions de ce devis (même projet + même pro)
+    const isClient = quote.project.clientId === req.user.id;
+    const isPro = quote.professional.user?.id === req.user.id;
+    const isAdmin = req.user.role === 'ADMIN';
+    if (!isClient && !isPro && !isAdmin) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
     const history = await prisma.quote.findMany({
-      where: {
-        projectId: quote.projectId,
-        professionalId: quote.professionalId,
-      },
+      where: { projectId: quote.projectId, professionalId: quote.professionalId },
       include: { items: true },
       orderBy: { version: 'asc' },
     });
@@ -262,13 +277,20 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       where: { id: req.params.id },
       include: {
         items: { orderBy: { sortOrder: 'asc' } },
-        professional: { include: { user: { select: { firstName: true, lastName: true, email: true, phone: true } } } },
+        professional: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } } },
         project: { select: { id: true, title: true, clientId: true } },
         revisions: { orderBy: { version: 'asc' }, select: { id: true, version: true, amount: true, status: true, createdAt: true } },
       },
     });
 
     if (!quote) return res.status(404).json({ error: 'Devis introuvable' });
+
+    const isClient = quote.project.clientId === req.user.id;
+    const isPro = quote.professional.user?.id === req.user.id;
+    const isAdmin = req.user.role === 'ADMIN';
+    if (!isClient && !isPro && !isAdmin) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
 
     res.json(quote);
   } catch (err) {

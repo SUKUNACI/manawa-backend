@@ -1,15 +1,10 @@
 const express = require('express');
-const axios = require('axios');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 const { getConfig } = require('../utils/appConfig');
 
 const router = express.Router();
-
-const CINETPAY_API_URL = 'https://api-checkout.cinetpay.com/v2/payment';
-const CINETPAY_CHECK_URL = 'https://api-checkout.cinetpay.com/v2/payment/check';
-const isCinetPayConfigured = !!(process.env.CINETPAY_API_KEY && process.env.CINETPAY_SITE_ID);
 
 const TIERS = {
   GRATUIT: {
@@ -268,54 +263,12 @@ router.post('/checkout', requireAuth, requireRole('PROFESSIONAL'), async (req, r
       finalAmount = applied.finalAmount;
     }
 
-    if (!isCinetPayConfigured) {
-      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      await prisma.subscription.upsert({
-        where: { professionalId: pro.id },
-        create: { professionalId: pro.id, tier, status: 'ACTIVE', transactionId, startedAt: new Date(), expiresAt },
-        update: { tier, status: 'ACTIVE', transactionId, startedAt: new Date(), expiresAt },
-      });
-      // Enregistrer l'usage promo
-      if (promoData) {
-        await prisma.$transaction([
-          prisma.promoUsage.create({
-            data: {
-              promoCodeId: promoData.promo.id,
-              professionalId: pro.id,
-              tier,
-              originalAmount: tierConfig.price,
-              discountAmount: promoData.discountAmount,
-              finalAmount: promoData.finalAmount,
-            },
-          }),
-          prisma.promoCode.update({ where: { id: promoData.promo.id }, data: { usedCount: { increment: 1 } } }),
-        ]);
-      }
-      return res.json({ devMode: true, activated: true, tier, expiresAt, discount: promoData ? promoData.discountAmount : 0, finalAmount });
-    }
-
-    const { data } = await axios.post(CINETPAY_API_URL, {
-      apikey: process.env.CINETPAY_API_KEY,
-      site_id: process.env.CINETPAY_SITE_ID,
-      transaction_id: transactionId,
-      amount: finalAmount,
-      currency: 'XOF',
-      description: `Abonnement ${tierConfig.label} MANAWA - 1 mois${promoData ? ' (promo: ' + promoData.promo.code + ')' : ''}`,
-      notify_url: `${process.env.BACKEND_PUBLIC_URL}/api/subscriptions/notify`,
-      return_url: `${process.env.BACKEND_PUBLIC_URL}/api/subscriptions/return`,
-      channels: 'MOBILE_MONEY',
-      customer_name: req.user.email,
-    });
-
-    if (data.code !== '201') return res.status(400).json({ error: data.message || 'Erreur lors de la création du paiement' });
-
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     await prisma.subscription.upsert({
       where: { professionalId: pro.id },
-      create: { professionalId: pro.id, tier, status: 'INACTIVE', transactionId },
-      update: { tier, transactionId },
+      create: { professionalId: pro.id, tier, status: 'ACTIVE', transactionId, startedAt: new Date(), expiresAt },
+      update: { tier, status: 'ACTIVE', transactionId, startedAt: new Date(), expiresAt },
     });
-
-    // Enregistrer l'usage promo (sera confirmé au webhook)
     if (promoData) {
       await prisma.$transaction([
         prisma.promoUsage.create({
@@ -331,46 +284,12 @@ router.post('/checkout', requireAuth, requireRole('PROFESSIONAL'), async (req, r
         prisma.promoCode.update({ where: { id: promoData.promo.id }, data: { usedCount: { increment: 1 } } }),
       ]);
     }
-
-    res.json({ devMode: false, paymentUrl: data.data.payment_url });
+    return res.json({ activated: true, tier, expiresAt, discount: promoData ? promoData.discountAmount : 0, finalAmount });
   } catch (err) {
-    if (err.response) {
-      console.error(err.response.data);
-      return res.status(500).json({ error: 'Impossible de contacter le service de paiement' });
-    }
     next(err);
   }
 });
 
-// POST /api/subscriptions/notify
-router.post('/notify', express.urlencoded({ extended: true }), async (req, res) => {
-  try {
-    const transactionId = req.body.cpm_trans_id;
-    if (!transactionId) return res.sendStatus(400);
-
-    const { data } = await axios.post(CINETPAY_CHECK_URL, {
-      apikey: process.env.CINETPAY_API_KEY,
-      site_id: process.env.CINETPAY_SITE_ID,
-      transaction_id: transactionId,
-    });
-
-    if (data.data?.status === 'ACCEPTED') {
-      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      await prisma.subscription.updateMany({
-        where: { transactionId },
-        data: { status: 'ACTIVE', startedAt: new Date(), expiresAt },
-      });
-    }
-    res.sendStatus(200);
-  } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.sendStatus(500);
-  }
-});
-
-router.get('/return', (req, res) => {
-  res.send(`<html><body style="font-family:sans-serif;text-align:center;padding-top:80px;"><h2>Abonnement traité</h2><p>Vous pouvez retourner sur l'application.</p></body></html>`);
-});
 
 module.exports = router;
 module.exports.isPremiumActive = isPremiumActive;

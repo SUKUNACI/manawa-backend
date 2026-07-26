@@ -12,6 +12,15 @@ const router = express.Router();
 // Tous les endpoints admin nécessitent authentification + rôle ADMIN
 router.use(requireAuth, requireRole('ADMIN'));
 
+// GET /api/admin/me — infos d'affichage de l'admin connecté (ne passe jamais par localStorage)
+router.get('/me', async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: { firstName: true, lastName: true, email: true },
+  });
+  res.json(user || {});
+});
+
 // ============================================================
 // 1. TABLEAU DE BORD
 // ============================================================

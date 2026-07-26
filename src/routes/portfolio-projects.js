@@ -1,10 +1,27 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const upload = require('../config/upload');
+const { verifyMagicBytes } = require('../config/upload');
 const { uploadBuffer } = require('../config/cloudinary');
 
 const router = express.Router();
+
+// 10 réalisations max par heure, 30 commentaires max par heure
+const createPortfolioLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Trop de réalisations créées, réessayez dans une heure' },
+});
+
+const createCommentLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { error: 'Trop de commentaires postés, réessayez dans une heure' },
+});
 
 // GET /api/portfolio-projects — feed public
 router.get('/', async (req, res, next) => {
@@ -107,7 +124,7 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // POST /api/portfolio-projects — créer une réalisation (pro uniquement)
-router.post('/', requireAuth, requireRole('PROFESSIONAL'), upload.array('images', 10), async (req, res, next) => {
+router.post('/', requireAuth, requireRole('PROFESSIONAL'), createPortfolioLimiter, upload.array('images', 10), verifyMagicBytes, async (req, res, next) => {
   try {
     const { title, description, tradeCategory } = req.body;
     if (!title || !description) return res.status(400).json({ error: 'Titre et description requis' });
@@ -199,7 +216,7 @@ router.post('/:id/like', requireAuth, async (req, res, next) => {
 });
 
 // POST /api/portfolio-projects/:id/comments — ajouter un commentaire ou une réponse
-router.post('/:id/comments', requireAuth, async (req, res, next) => {
+router.post('/:id/comments', requireAuth, createCommentLimiter, async (req, res, next) => {
   try {
     const { content, rating, parentId } = req.body;
     if (!content || content.trim().length === 0) return res.status(400).json({ error: 'Commentaire requis' });
@@ -238,7 +255,10 @@ router.delete('/:projectId/comments/:commentId', requireAuth, async (req, res, n
     const comment = await prisma.portfolioComment.findUnique({ where: { id: req.params.commentId } });
     if (!comment) return res.status(404).json({ error: 'Commentaire non trouvé' });
 
-    // Vérifier que c'est l'auteur ou un admin
+    if (comment.portfolioProjectId !== req.params.projectId) {
+      return res.status(404).json({ error: 'Commentaire non trouvé' });
+    }
+
     if (comment.authorId !== req.user.id && req.user.role !== 'ADMIN') {
       return res.status(403).json({ error: 'Accès refusé' });
     }

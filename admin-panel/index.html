@@ -168,20 +168,6 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
 .toast.show{transform:translateY(0);opacity:1;}
 .toast p{font-size:13px;color:var(--light);}
 
-/* ── LOGIN ── */
-.login-overlay{position:fixed;inset:0;background:var(--dark);z-index:9999;display:flex;align-items:center;justify-content:center;}
-.login-overlay.hidden{display:none;}
-.login-box{background:var(--dark2);border:1px solid var(--border);border-radius:24px;padding:40px;width:400px;max-width:90vw;}
-.login-box h1{font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--white);margin-bottom:4px;}
-.login-box h1 span{color:var(--orange);}
-.login-box .login-sub{font-size:13px;color:var(--muted);margin-bottom:28px;}
-.login-box label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;letter-spacing:0.5px;}
-.login-box input{width:100%;background:var(--dark3);border:1.5px solid var(--border);border-radius:12px;padding:12px 14px;font-size:14px;color:var(--white);font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s;margin-bottom:16px;}
-.login-box input:focus{border-color:var(--orange);}
-.login-box .login-btn{width:100%;padding:14px;border-radius:12px;background:var(--orange);color:#fff;font-size:14px;font-weight:700;font-family:'DM Sans',sans-serif;border:none;cursor:pointer;transition:all .2s;margin-top:8px;}
-.login-box .login-btn:hover{background:var(--orange-light);}
-.login-box .login-btn:disabled{opacity:0.5;cursor:not-allowed;}
-.login-error{background:var(--red-dim);border:1px solid rgba(239,68,68,0.25);color:var(--red);padding:10px 14px;border-radius:10px;font-size:12px;margin-bottom:16px;display:none;}
 
 /* ── PAGINATION ── */
 .pagination{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:16px;}
@@ -206,19 +192,6 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
 </head>
 <body>
 
-<!-- ══ LOGIN SCREEN ══ -->
-<div class="login-overlay" id="login-overlay">
-  <div class="login-box">
-    <h1>MAN<span>AWA</span></h1>
-    <p class="login-sub">BACK-OFFICE ADMIN</p>
-    <div class="login-error" id="login-error"></div>
-    <label>Email</label>
-    <input type="email" id="login-email" placeholder="Votre email admin">
-    <label>Mot de passe</label>
-    <input type="password" id="login-password" placeholder="Votre mot de passe">
-    <button class="login-btn" id="login-btn" onclick="doLogin()">Se connecter</button>
-  </div>
-</div>
 
 <!-- ══ SIDEBAR ══ -->
 <aside class="sidebar">
@@ -278,7 +251,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
   <div class="sidebar-footer">
     <div class="admin-chip">
       <div class="av">👤</div>
-      <div class="ai"><h4 id="admin-name">Super Admin</h4><p id="admin-email">app_manawa@proton.me</p></div>
+      <div class="ai"><h4 id="admin-name"></h4><p id="admin-email"></p></div>
     </div>
     <button class="btn-logout" onclick="logout()">🚪 Se déconnecter</button>
   </div>
@@ -2367,97 +2340,35 @@ const titles = {
 // ══════════════════════════════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════════════════════════════
-function getToken() {
-  return localStorage.getItem('admin_token');
-}
+// Données d'affichage en mémoire — jamais dans localStorage/sessionStorage
+let _adminUser = null;
 
 function isLoggedIn() {
-  return !!getToken();
+  return _adminUser !== null;
 }
 
 function logout() {
-  localStorage.removeItem('admin_token');
-  localStorage.removeItem('admin_user');
-  document.getElementById('login-overlay').classList.remove('hidden');
+  _adminUser = null;
+  fetch(API_BASE + '/auth/logout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({}),
+  }).catch(() => {});
+  window.location.href = '/admin/login.html';
 }
 
-async function doLogin() {
-  const email = document.getElementById('login-email').value.trim();
-  const password = document.getElementById('login-password').value;
-  const errEl = document.getElementById('login-error');
-  const btn = document.getElementById('login-btn');
-
-  if (!email || !password) {
-    errEl.textContent = 'Veuillez remplir tous les champs';
-    errEl.style.display = 'block';
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = 'Connexion...';
-  errEl.style.display = 'none';
-
-  try {
-    const res = await fetch(API_BASE + '/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Erreur de connexion');
-    }
-
-    if (data.user && data.user.role !== 'ADMIN') {
-      throw new Error('Accès réservé aux administrateurs');
-    }
-
-    localStorage.setItem('admin_token', data.token);
-    localStorage.setItem('admin_user', JSON.stringify(data.user));
-
-    // Update admin chip
-    if (data.user) {
-      document.getElementById('admin-name').textContent = (data.user.firstName || '') + ' ' + (data.user.lastName || '');
-      document.getElementById('admin-email').textContent = data.user.email || '';
-    }
-
-    document.getElementById('login-overlay').classList.add('hidden');
-    loadDashboard();
-    loadModerationStats();
-    loadDisputeStats();
-    loadSecurityStats();
-    loadReviewStats();
-  } catch (err) {
-    errEl.textContent = err.message;
-    errEl.style.display = 'block';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Se connecter';
-  }
-}
-
-// Enter key login
-document.getElementById('login-password').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') doLogin();
-});
-document.getElementById('login-email').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') document.getElementById('login-password').focus();
-});
 
 // ══════════════════════════════════════════════════════════════
 // API HELPER
 // ══════════════════════════════════════════════════════════════
 async function apiCall(endpoint, options = {}) {
-  const token = getToken();
   const headers = {
     'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
-    ...(options.headers || {})
+    ...(options.headers || {}),
   };
 
-  const res = await fetch(API_BASE + endpoint, { ...options, headers });
+  const res = await fetch(API_BASE + endpoint, { ...options, headers, credentials: 'include' });
 
   if (res.status === 401) {
     logout();
@@ -2800,7 +2711,7 @@ async function loadDashboard() {
     }
   } catch (err) {
     if (err.message !== 'Unauthorized') {
-      console.error('Dashboard error:', err);
+      void err;
     }
   }
 }
@@ -2872,7 +2783,7 @@ async function loadVerifications() {
 
   } catch (err) {
     if (err.message !== 'Unauthorized') {
-      console.error('Verifications error:', err);
+      void err;
       document.getElementById('verif-grid').innerHTML = '<div class="empty-state"><div class="es-icon">⚠️</div><p>Erreur lors du chargement</p></div>';
     }
   }
@@ -3009,7 +2920,7 @@ async function loadProfessionals(page) {
     }
   } catch (err) {
     if (err.message !== 'Unauthorized') {
-      console.error('Professionals error:', err);
+      void err;
     }
   }
 }
@@ -3347,7 +3258,7 @@ async function loadClients(page) {
     }
   } catch (err) {
     if (err.message !== 'Unauthorized') {
-      console.error('Clients error:', err);
+      void err;
     }
   }
 }
@@ -3528,7 +3439,7 @@ async function loadProjects(page = 1) {
     }
   } catch (err) {
     if (err.message !== 'Unauthorized') {
-      console.error('Projects error:', err);
+      void err;
     }
   }
 }
@@ -3622,7 +3533,6 @@ async function viewProject(id) {
     document.getElementById('modal-project').classList.add('show');
   } catch (err) {
     showToast('Erreur lors du chargement du projet');
-    console.error(err);
   }
 }
 
@@ -3647,7 +3557,6 @@ async function deleteProject(id, title) {
     loadProjects(1);
   } catch (err) {
     showToast('Erreur lors de la suppression');
-    console.error(err);
   }
 }
 
@@ -3711,7 +3620,7 @@ async function loadPaymentStats() {
 
   } catch (err) {
     if (err.message !== 'Unauthorized') {
-      console.error('Payment stats error:', err);
+      void err;
     }
   }
 }
@@ -3772,7 +3681,7 @@ async function loadPayments(page) {
     }
   } catch (err) {
     if (err.message !== 'Unauthorized') {
-      console.error('Payments error:', err);
+      void err;
     }
   }
 }
@@ -4084,7 +3993,7 @@ async function loadAnalytics() {
     }
 
   } catch (err) {
-    console.error('Analytics error:', err);
+    void err;
     showToast('Erreur chargement analytics : ' + err.message, true);
   }
 }
@@ -4167,7 +4076,7 @@ async function loadFinances() {
     }).join('');
 
   } catch (err) {
-    console.error('Finances summary error:', err);
+    void err;
   }
 
   loadFinancesCommissions(1);
@@ -4428,7 +4337,7 @@ async function loadAuditLogs(page = 1) {
       paginationEl.style.display = 'none';
     }
   } catch (err) {
-    if (err.message !== 'Unauthorized') console.error('Audit logs error:', err);
+    void err;
   }
 }
 
@@ -4557,7 +4466,7 @@ async function loadDeletedUsers(page = 1) {
       pag.innerHTML = '';
     }
   } catch (err) {
-    if (err.message !== 'Unauthorized') console.error('Deleted users error:', err);
+    void err;
   }
 }
 
@@ -5595,7 +5504,7 @@ async function loadSupportTickets() {
       return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(t.id) + '" onclick="navigator.clipboard.writeText(\'' + escAttr(t.id) + '\');showToast(\'ID copié\')">#' + escHtml(t.id.substring(0, 6)) + '</span></td><td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + '</span><br><span class="badge badge-' + (u.role === 'PROFESSIONAL' ? 'orange' : 'blue') + '" style="font-size:9px;margin-top:2px;">' + (u.role === 'PROFESSIONAL' ? 'Pro' : 'Client') + '</span></td><td>' + cat + '</td><td><strong>' + escHtml(t.subject) + '</strong></td><td><span class="badge ' + st.badge + '">' + st.label + '</span></td><td style="font-size:12px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(lastMsg) + '</td><td>' + formatDate(t.updatedAt) + '</td><td class="td-actions"><button class="btn btn-view" onclick="event.stopPropagation();openSupportTicket(\'' + t.id + '\')">💬 Ouvrir</button></td></tr>';
     }).join('');
   } catch (err) {
-    if (err.message !== 'Unauthorized') console.error('Support error:', err);
+    void err;
   }
 }
 
@@ -6010,23 +5919,22 @@ async function reviewModalDelete() {
 // ══════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════
-(function init() {
-  if (isLoggedIn()) {
-    document.getElementById('login-overlay').classList.add('hidden');
-    // Restore admin info
-    try {
-      const user = JSON.parse(localStorage.getItem('admin_user'));
-      if (user) {
-        document.getElementById('admin-name').textContent = (user.firstName || '') + ' ' + (user.lastName || '');
-        document.getElementById('admin-email').textContent = user.email || '';
-      }
-    } catch(e) {}
-    loadDashboard();
-    loadModerationStats();
-    loadDisputeStats();
-    loadSecurityStats();
-    loadReviewStats();
+(async function init() {
+  // Vérifier le cookie httpOnly via l'API — aucune donnée sensible en localStorage
+  try {
+    const user = await apiCall('/admin/me');
+    _adminUser = user;
+    document.getElementById('admin-name').textContent = ((user.firstName || '') + ' ' + (user.lastName || '')).trim();
+    document.getElementById('admin-email').textContent = user.email || '';
+  } catch {
+    window.location.href = '/admin/login.html';
+    return;
   }
+  loadDashboard();
+  loadModerationStats();
+  loadDisputeStats();
+  loadSecurityStats();
+  loadReviewStats();
 })();
 
 // ══════════════════════════════════════════════════════════════

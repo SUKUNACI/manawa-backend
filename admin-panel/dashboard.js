@@ -2756,7 +2756,7 @@ async function loadSubscriptions(page) {
         + '<td>' + statusBadge + '</td>'
         + '<td style="font-size:12px;color:var(--muted);">' + (s.startedAt ? new Date(s.startedAt).toLocaleDateString('fr-FR') : '--') + '</td>'
         + '<td style="font-size:12px;' + (isExpiring ? 'color:var(--orange);font-weight:600;' : 'color:var(--muted);') + '">' + (s.expiresAt ? new Date(s.expiresAt).toLocaleDateString('fr-FR') : '--') + '</td>'
-        + '<td><button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="openSubModal(\'' + s.professional.id + '\',\'' + name.replace(/'/g,"") + '\',\'' + escHtml(u.email||'') + '\',\'' + s.tier + '\',\'' + (isActive ? 'Actif' : 'Inactif') + '\',\'' + (s.expiresAt ? new Date(s.expiresAt).toLocaleDateString(\'fr-FR\') : \'--\') + '\')">Gérer</button></td>'
+        + '<td><button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="openSubModal(\'' + s.professional.id + '\',\'' + name.replace(/'/g,"") + '\',\'' + escHtml(u.email||'') + '\',\'' + s.tier + '\',\'' + (isActive ? 'Actif' : 'Inactif') + '\',\'' + (s.expiresAt ? new Date(s.expiresAt).toLocaleDateString('fr-FR') : '--') + '\')">Gérer</button></td>'
         + '</tr>';
     }).join('');
 

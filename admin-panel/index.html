@@ -294,8 +294,38 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
         </div>
       </div>
 
+      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-top:-12px;">
+        <div class="kpi" style="background:rgba(232,184,75,0.08);border-color:rgba(232,184,75,0.2);">
+          <div class="kpi-icon">⭐</div>
+          <div class="kpi-val" style="color:var(--gold);" id="kpi-premium">--</div>
+          <div class="kpi-label">Abonnements Premium actifs</div>
+        </div>
+        <div class="kpi" style="background:rgba(59,130,246,0.08);border-color:rgba(59,130,246,0.2);">
+          <div class="kpi-icon">📄</div>
+          <div class="kpi-val" style="color:var(--blue);" id="kpi-quotes">--</div>
+          <div class="kpi-label">Devis envoyés (total)</div>
+        </div>
+        <div class="kpi" style="background:rgba(34,197,94,0.08);border-color:rgba(34,197,94,0.2);">
+          <div class="kpi-icon">✅</div>
+          <div class="kpi-val" style="color:var(--green);" id="kpi-payments-ok">--</div>
+          <div class="kpi-label">Paiements réussis</div>
+        </div>
+      </div>
+
       <div class="alert alert-warn" id="dashboard-alert" style="display:none;">
         ⚠️ <span id="dashboard-alert-text"></span>
+      </div>
+
+      <!-- Graphique CA mensuel -->
+      <div class="chart-card" style="margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <h3 style="margin:0;">💹 Chiffre d'affaires mensuel (12 mois)</h3>
+          <span style="font-size:13px;color:var(--muted);" id="dashboard-revenue-total"></span>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:6px;height:120px;" id="dashboard-revenue-chart">
+          <div class="loading-spinner"></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;" id="dashboard-revenue-labels"></div>
       </div>
 
       <div class="chart-row">
@@ -790,12 +820,45 @@ async function loadDashboard() {
     const data = await apiCall('/admin/dashboard');
     dashboardData = data;
 
-    // KPIs
+    // KPIs ligne 1
     document.getElementById('kpi-pros').textContent = formatNumber(data.users.professionals);
     document.getElementById('kpi-clients').textContent = formatNumber(data.users.clients);
     document.getElementById('kpi-projects').textContent = formatNumber(data.projects.total);
     document.getElementById('kpi-projects-delta').textContent = '▲ ' + data.projects.open + ' ouverts';
     document.getElementById('kpi-revenue').textContent = formatCurrency(data.payments.revenue);
+
+    // KPIs ligne 2
+    document.getElementById('kpi-premium').textContent = formatNumber(data.subscriptions.activePremium);
+    document.getElementById('kpi-quotes').textContent = formatNumber(data.quotes.total);
+    document.getElementById('kpi-payments-ok').textContent = formatNumber(data.payments.total);
+
+    // Graphique CA mensuel
+    try {
+      const stats = await apiCall('/admin/payments/stats');
+      const revenueByMonth = stats.revenueByMonth || {};
+      const now = new Date();
+      const months = [];
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+        const shortLabel = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'][d.getMonth()];
+        months.push({ key, label: shortLabel, val: revenueByMonth[key] || 0 });
+      }
+      const maxRev = Math.max(...months.map(m => m.val), 1);
+      const totalRev = months.reduce((s, m) => s + m.val, 0);
+      document.getElementById('dashboard-revenue-total').textContent = 'Total 12 mois : ' + formatCurrency(totalRev) + ' FCFA';
+      document.getElementById('dashboard-revenue-chart').innerHTML = months.map(m =>
+        '<div class="bar-item" style="flex:1;">' +
+          '<div style="font-size:9px;color:var(--orange);font-weight:600;margin-bottom:2px;">' + (m.val > 0 ? formatCurrency(m.val) : '') + '</div>' +
+          '<div style="width:100%;border-radius:6px 6px 0 0;background:' + (m.val > 0 ? 'linear-gradient(180deg,var(--green),rgba(34,197,94,0.3))' : 'rgba(255,255,255,0.04)') + ';height:' + Math.max(3, (m.val / maxRev) * 100) + '%;transition:height .5s;"></div>' +
+        '</div>'
+      ).join('');
+      document.getElementById('dashboard-revenue-labels').innerHTML = months.map(m =>
+        '<div style="flex:1;text-align:center;font-size:9px;color:var(--muted);">' + m.label + '</div>'
+      ).join('');
+    } catch(e) {
+      document.getElementById('dashboard-revenue-chart').innerHTML = '<p style="color:var(--muted);font-size:13px;">Données indisponibles</p>';
+    }
 
     // Alert
     if (data.pendingVerifications > 0) {

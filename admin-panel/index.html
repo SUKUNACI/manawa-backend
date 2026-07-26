@@ -247,6 +247,10 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     <span class="ni">🛡️</span> Modération
     <span class="nav-badge" id="badge-moderation" style="display:none;">0</span>
   </div>
+  <div class="nav-item" onclick="showPage('security',this)">
+    <span class="ni">🔒</span> Sécurité & Conformité
+    <span class="nav-badge red" id="badge-security" style="display:none;">0</span>
+  </div>
   <div class="nav-item" onclick="showPage('market',this)"><span class="ni">🏗️</span> Marché & Opportunités</div>
   <div class="nav-item" onclick="showPage('subscriptions',this)"><span class="ni">⭐</span> Abonnements</div>
   <div class="nav-item" onclick="showPage('disputes',this)">
@@ -857,6 +861,85 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       </div>
     </div>
 
+    <!-- ══ PAGE: SÉCURITÉ & CONFORMITÉ ══ -->
+    <div class="page" id="page-security">
+
+      <!-- KPIs -->
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px;">
+        <div class="kpi red"><div class="kpi-icon">🚫</div><div class="kpi-val" id="sec-suspended">--</div><div class="kpi-label">Comptes suspendus</div></div>
+        <div class="kpi orange"><div class="kpi-icon">🔑</div><div class="kpi-val" id="sec-resets">--</div><div class="kpi-label">Resets mot de passe actifs</div></div>
+        <div class="kpi blue"><div class="kpi-icon">📧</div><div class="kpi-val" id="sec-unverified">--</div><div class="kpi-label">Emails non vérifiés</div></div>
+        <div class="kpi purple"><div class="kpi-icon">🗄️</div><div class="kpi-val" id="sec-archived">--</div><div class="kpi-label">Comptes archivés (RGPD)</div></div>
+      </div>
+      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:24px;">
+        <div class="kpi red"><div class="kpi-icon">⚠️</div><div class="kpi-val" id="sec-stale-resets">--</div><div class="kpi-label">Resets non utilisés +1h</div></div>
+        <div class="kpi orange"><div class="kpi-icon">📱</div><div class="kpi-val" id="sec-otp-orphans">--</div><div class="kpi-label">OTP expirés non nettoyés</div></div>
+        <div class="kpi green"><div class="kpi-icon">🛠️</div><div class="kpi-val" id="sec-admin-actions">--</div><div class="kpi-label">Actions admin (7 derniers jours)</div></div>
+      </div>
+
+      <!-- Alertes + Nettoyage -->
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:24px;">
+        <!-- Alertes -->
+        <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+          <div style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);">🚨 Alertes sécurité</div>
+          <div id="sec-alerts-container">
+            <div style="color:var(--muted);font-size:13px;">Chargement…</div>
+          </div>
+        </div>
+        <!-- Actions de maintenance -->
+        <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+          <div style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);">🧹 Maintenance</div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="background:var(--dark2);border-radius:10px;padding:12px;">
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Nettoyer OTP expirés</div>
+              <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Supprime les codes OTP et resets de mot de passe expirés non utilisés.</div>
+              <button class="btn btn-secondary" onclick="cleanOtps()">🧹 Lancer le nettoyage</button>
+            </div>
+            <div style="background:var(--dark2);border-radius:10px;padding:12px;">
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Emails non vérifiés +30j</div>
+              <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Comptes inscrits depuis +30j sans vérifier leur email.</div>
+              <div id="sec-unverified-count" style="font-size:22px;font-weight:700;color:var(--orange);">--</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Comptes suspendus -->
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:24px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <div style="font-size:15px;font-weight:600;color:var(--text);">🚫 Comptes suspendus</div>
+          <input class="filter-input" placeholder="🔍 Rechercher..." id="sec-susp-search" oninput="debounceSecSearch()" style="width:220px;">
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Nom</th><th>Email</th><th>Rôle</th><th>Ville</th><th>Suspendu le</th><th>Actions</th></tr></thead>
+            <tbody id="sec-susp-tbody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="sec-susp-empty" style="display:none;">
+          <div class="es-icon">✅</div><p>Aucun compte suspendu</p>
+        </div>
+        <div class="pagination" id="sec-susp-pagination"></div>
+      </div>
+
+      <!-- Journal des actions admin -->
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <div style="font-size:15px;font-weight:600;color:var(--text);">📋 Journal des actions admin</div>
+          <button class="btn btn-secondary" onclick="loadSecurityActivity()">🔄 Rafraîchir</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Type</th><th>Action</th></tr></thead>
+            <tbody id="sec-activity-tbody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="sec-activity-empty" style="display:none;">
+          <div class="es-icon">📋</div><p>Aucune action récente</p>
+        </div>
+      </div>
+    </div>
+
     <!-- ══ PAGE: MARCHÉ & OPPORTUNITÉS ══ -->
     <div class="page" id="page-market">
 
@@ -1332,6 +1415,7 @@ const titles = {
   finances: 'Finances & Revenus',
   analytics: 'Analytics Métier',
   moderation: 'Modération de contenu',
+  security: 'Sécurité & Conformité',
   market: 'Marché & Opportunités',
   subscriptions: 'Gestion des abonnements',
   disputes: 'Litiges & Remboursements',
@@ -1403,6 +1487,7 @@ async function doLogin() {
     loadDashboard();
     loadModerationStats();
     loadDisputeStats();
+    loadSecurityStats();
   } catch (err) {
     errEl.textContent = err.message;
     errEl.style.display = 'block';
@@ -1476,6 +1561,7 @@ function showPage(id, el) {
     case 'finances': loadFinances(); break;
     case 'analytics': loadAnalytics(); break;
     case 'moderation': loadModeration(1); break;
+    case 'security': loadSecurity(); break;
     case 'market': loadMarket(); break;
     case 'subscriptions': loadSubStats(); loadSubscriptions(1); break;
     case 'disputes': loadDisputeStats(); loadDisputes(1); break;
@@ -3463,6 +3549,186 @@ function getTradeEmoji(trade) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// SÉCURITÉ & CONFORMITÉ
+// ══════════════════════════════════════════════════════════════
+
+let secDebounceTimer = null;
+
+async function loadSecurity() {
+  await Promise.all([loadSecurityStats(), loadSecurityAlerts(), loadSuspended(1), loadSecurityActivity()]);
+}
+
+async function loadSecurityStats() {
+  try {
+    const s = await apiCall('/admin/security/stats');
+    document.getElementById('sec-suspended').textContent    = formatNumber(s.suspendedCount);
+    document.getElementById('sec-resets').textContent       = formatNumber(s.resetActive);
+    document.getElementById('sec-unverified').textContent   = formatNumber(s.emailUnverified);
+    document.getElementById('sec-archived').textContent     = formatNumber(s.archivedCount);
+    document.getElementById('sec-stale-resets').textContent = formatNumber(s.resetStale);
+    document.getElementById('sec-otp-orphans').textContent  = formatNumber(s.otpOrphans);
+    document.getElementById('sec-admin-actions').textContent = formatNumber(s.recentAdminActions);
+    document.getElementById('sec-unverified-count').textContent = formatNumber(s.emailUnverified30d);
+
+    // Badge nav
+    const urgent = s.suspendedCount + s.resetStale + s.reportsPending + s.disputesOpen;
+    const badge = document.getElementById('badge-security');
+    if (urgent > 0) { badge.textContent = urgent; badge.style.display = ''; }
+    else badge.style.display = 'none';
+  } catch (err) {
+    showToast('Erreur stats sécurité', true);
+  }
+}
+
+async function loadSecurityAlerts() {
+  try {
+    const d = await apiCall('/admin/security/alerts');
+    const container = document.getElementById('sec-alerts-container');
+    const parts = [];
+
+    if (d.staleResets && d.staleResets.length > 0) {
+      parts.push(
+        '<div style="margin-bottom:14px;">'
+        + '<div style="font-size:13px;font-weight:600;color:var(--orange);margin-bottom:8px;">🔑 Resets de mot de passe non utilisés depuis +1h (' + d.staleResets.length + ')</div>'
+        + d.staleResets.map(u =>
+          '<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--dark2);border-radius:8px;margin-bottom:4px;font-size:12px;">'
+          + '<span>' + escHtml(u.firstName + ' ' + u.lastName) + ' — ' + escHtml(u.email) + '</span>'
+          + '<span style="color:var(--muted);">' + new Date(u.updatedAt).toLocaleString('fr-FR') + '</span>'
+          + '</div>'
+        ).join('')
+        + '</div>'
+      );
+    }
+
+    if (d.unverifiedOld && d.unverifiedOld.length > 0) {
+      parts.push(
+        '<div style="margin-bottom:14px;">'
+        + '<div style="font-size:13px;font-weight:600;color:var(--blue);margin-bottom:8px;">📧 Emails non vérifiés depuis +30j (' + d.unverifiedOld.length + ')</div>'
+        + d.unverifiedOld.slice(0,10).map(u =>
+          '<div style="display:flex;justify-content:space-between;padding:6px 10px;background:var(--dark2);border-radius:8px;margin-bottom:4px;font-size:12px;">'
+          + '<span>' + escHtml(u.firstName + ' ' + u.lastName) + ' — ' + escHtml(u.email) + '</span>'
+          + '<span style="color:var(--muted);">' + new Date(u.createdAt).toLocaleDateString('fr-FR') + '</span>'
+          + '</div>'
+        ).join('')
+        + (d.unverifiedOld.length > 10 ? '<div style="font-size:11px;color:var(--muted);padding:4px 10px;">+ ' + (d.unverifiedOld.length - 10) + ' autres…</div>' : '')
+        + '</div>'
+      );
+    }
+
+    if (d.otpOrphans && d.otpOrphans.length > 0) {
+      parts.push(
+        '<div>'
+        + '<div style="font-size:13px;font-weight:600;color:var(--muted);margin-bottom:8px;">📱 OTP expirés non nettoyés (' + d.otpOrphans.length + ')</div>'
+        + '<div style="font-size:12px;color:var(--muted);">Ces codes sont inoffensifs mais encombrent la base. Utilisez le nettoyage automatique.</div>'
+        + '</div>'
+      );
+    }
+
+    container.innerHTML = parts.length > 0
+      ? parts.join('')
+      : '<div style="display:flex;align-items:center;gap:10px;color:var(--green);font-size:14px;">✅ Aucune alerte sécurité active</div>';
+  } catch (err) {
+    document.getElementById('sec-alerts-container').innerHTML = '<div style="color:var(--muted);font-size:13px;">Erreur chargement alertes</div>';
+  }
+}
+
+async function loadSuspended(page) {
+  try {
+    const search = document.getElementById('sec-susp-search').value.trim();
+    const params = '?page=' + page + '&limit=20' + (search ? '&search=' + encodeURIComponent(search) : '');
+    const data = await apiCall('/admin/security/suspended' + params);
+    const tbody = document.getElementById('sec-susp-tbody');
+    const empty = document.getElementById('sec-susp-empty');
+    const pagination = document.getElementById('sec-susp-pagination');
+    const users = data.users || [];
+
+    if (users.length === 0) {
+      tbody.innerHTML = ''; empty.style.display = ''; pagination.innerHTML = ''; return;
+    }
+    empty.style.display = 'none';
+
+    const roleLabel = { CLIENT: 'Client', PROFESSIONAL: 'Pro', ADMIN: 'Admin' };
+    tbody.innerHTML = users.map(u =>
+      '<tr>'
+      + '<td><strong>' + escHtml(u.firstName + ' ' + u.lastName) + '</strong></td>'
+      + '<td>' + escHtml(u.email) + '</td>'
+      + '<td><span class="badge badge-' + (u.role === 'PROFESSIONAL' ? 'orange' : 'blue') + '">' + (roleLabel[u.role] || u.role) + '</span></td>'
+      + '<td style="color:var(--muted);font-size:12px;">' + escHtml(u.city || '--') + '</td>'
+      + '<td style="color:var(--muted);font-size:12px;">' + new Date(u.updatedAt).toLocaleDateString('fr-FR') + '</td>'
+      + '<td><button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;color:var(--green);" onclick="reactivateUser(\'' + u.id + '\',\'' + escHtml(u.firstName + ' ' + u.lastName).replace(/'/g,'') + '\')">✅ Réactiver</button></td>'
+      + '</tr>'
+    ).join('');
+
+    if (data.totalPages > 1) {
+      let html = '';
+      if (page > 1) html += '<button class="btn btn-secondary" onclick="loadSuspended(' + (page-1) + ')">← Précédent</button>';
+      html += '<span style="color:var(--muted);font-size:13px;">Page ' + page + ' / ' + data.totalPages + '</span>';
+      if (page < data.totalPages) html += '<button class="btn btn-secondary" onclick="loadSuspended(' + (page+1) + ')">Suivant →</button>';
+      pagination.innerHTML = html;
+    } else {
+      pagination.innerHTML = '';
+    }
+  } catch (err) {
+    showToast('Erreur comptes suspendus', true);
+  }
+}
+
+function debounceSecSearch() {
+  clearTimeout(secDebounceTimer);
+  secDebounceTimer = setTimeout(() => loadSuspended(1), 350);
+}
+
+async function reactivateUser(userId, name) {
+  if (!confirm('Réactiver le compte de ' + name + ' ?')) return;
+  try {
+    await apiCall('/admin/users/' + userId + '/reactivate', { method: 'PATCH' });
+    showToast('✅ Compte de ' + name + ' réactivé');
+    loadSecurityStats();
+    loadSuspended(1);
+  } catch (err) {
+    showToast('Erreur : ' + (err.message || 'Réactivation échouée'), true);
+  }
+}
+
+async function cleanOtps() {
+  if (!confirm('Nettoyer tous les OTP et codes de reset expirés ?')) return;
+  try {
+    const res = await apiCall('/admin/security/clean-otps', { method: 'POST' });
+    showToast('✅ ' + res.cleaned + ' enregistrement(s) nettoyé(s) — OTP: ' + res.otpCleaned + ', Resets: ' + res.resetCleaned);
+    loadSecurityStats();
+    loadSecurityAlerts();
+  } catch (err) {
+    showToast('Erreur nettoyage : ' + (err.message || 'Échec'), true);
+  }
+}
+
+async function loadSecurityActivity() {
+  try {
+    const data = await apiCall('/admin/security/activity?limit=30');
+    const tbody = document.getElementById('sec-activity-tbody');
+    const empty = document.getElementById('sec-activity-empty');
+    const events = data.events || [];
+
+    if (events.length === 0) {
+      tbody.innerHTML = ''; empty.style.display = ''; return;
+    }
+    empty.style.display = 'none';
+
+    const typeColors = { broadcast: 'blue', dispute: 'orange', report: 'purple', payment: 'green' };
+    const typeLabels = { broadcast: '📡 Broadcast', dispute: '⚖️ Litige', report: '🛡️ Signalement', payment: '💳 Paiement' };
+    tbody.innerHTML = events.map(e =>
+      '<tr>'
+      + '<td style="font-size:12px;color:var(--muted);white-space:nowrap;">' + new Date(e.date).toLocaleString('fr-FR') + '</td>'
+      + '<td><span class="badge badge-' + (typeColors[e.type] || 'muted') + '">' + (typeLabels[e.type] || e.type) + '</span></td>'
+      + '<td style="font-size:13px;">' + escHtml(e.summary) + '</td>'
+      + '</tr>'
+    ).join('');
+  } catch (err) {
+    showToast('Erreur journal activité', true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // MARCHÉ & OPPORTUNITÉS
 // ══════════════════════════════════════════════════════════════
 
@@ -4184,6 +4450,7 @@ async function changeSupportStatus() {
     loadDashboard();
     loadModerationStats();
     loadDisputeStats();
+    loadSecurityStats();
   }
 })();
 </script>

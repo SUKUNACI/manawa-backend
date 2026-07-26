@@ -247,6 +247,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     <span class="ni">🛡️</span> Modération
     <span class="nav-badge" id="badge-moderation" style="display:none;">0</span>
   </div>
+  <div class="nav-item" onclick="showPage('market',this)"><span class="ni">🏗️</span> Marché & Opportunités</div>
   <div class="nav-item" onclick="showPage('subscriptions',this)"><span class="ni">⭐</span> Abonnements</div>
   <div class="nav-item" onclick="showPage('disputes',this)">
     <span class="ni">⚖️</span> Litiges
@@ -856,6 +857,78 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       </div>
     </div>
 
+    <!-- ══ PAGE: MARCHÉ & OPPORTUNITÉS ══ -->
+    <div class="page" id="page-market">
+
+      <!-- KPIs row 1 -->
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px;">
+        <div class="kpi blue"><div class="kpi-icon">📋</div><div class="kpi-val" id="mkt-open">--</div><div class="kpi-label">Projets ouverts</div></div>
+        <div class="kpi red"><div class="kpi-icon">⚠️</div><div class="kpi-val" id="mkt-stale">--</div><div class="kpi-label">Sans réponse +7j</div></div>
+        <div class="kpi green"><div class="kpi-icon">📊</div><div class="kpi-val" id="mkt-coverage">--</div><div class="kpi-label">Taux de couverture</div></div>
+        <div class="kpi orange"><div class="kpi-icon">⏱️</div><div class="kpi-val" id="mkt-delay">--</div><div class="kpi-label">Délai moyen 1er devis</div></div>
+      </div>
+      <!-- KPIs row 2 -->
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px;">
+        <div class="kpi purple"><div class="kpi-icon">💰</div><div class="kpi-val" id="mkt-budget-min">--</div><div class="kpi-label">Budget moyen min (FCFA)</div></div>
+        <div class="kpi purple"><div class="kpi-icon">💰</div><div class="kpi-val" id="mkt-budget-max">--</div><div class="kpi-label">Budget moyen max (FCFA)</div></div>
+        <div class="kpi blue"><div class="kpi-icon">👷</div><div class="kpi-val" id="mkt-pros">--</div><div class="kpi-label">Pros enregistrés</div></div>
+        <div class="kpi green"><div class="kpi-icon">✅</div><div class="kpi-val" id="mkt-verified-pros">--</div><div class="kpi-label">Pros vérifiés</div></div>
+      </div>
+
+      <!-- Graphique projets par mois + Demande vs Offre par métier -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+        <!-- Graphique évolution projets -->
+        <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+          <div style="font-size:15px;font-weight:600;margin-bottom:4px;color:var(--text);">📈 Nouveaux projets / mois</div>
+          <div id="mkt-chart-label" style="font-size:12px;color:var(--muted);margin-bottom:12px;"></div>
+          <div style="display:flex;align-items:flex-end;gap:3px;height:90px;" id="mkt-bar-chart"></div>
+          <div style="display:flex;gap:3px;margin-top:4px;" id="mkt-bar-labels"></div>
+        </div>
+        <!-- Top métiers demandés -->
+        <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+          <div style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);">🔥 Top métiers demandés vs offre</div>
+          <div id="mkt-trade-balance" style="display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto;"></div>
+        </div>
+      </div>
+
+      <!-- Budget moyen + Carte villes -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+        <!-- Budget par métier -->
+        <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+          <div style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);">💰 Budget moyen par métier</div>
+          <div class="table-wrap" style="max-height:220px;overflow-y:auto;">
+            <table style="font-size:12px;">
+              <thead><tr><th>Métier</th><th>Projets</th><th>Budget min moy.</th><th>Budget max moy.</th></tr></thead>
+              <tbody id="mkt-budget-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Villes : demande vs offre -->
+        <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+          <div style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);">🗺️ Villes : demande vs offre pros</div>
+          <div id="mkt-city-bars" style="display:flex;flex-direction:column;gap:8px;max-height:220px;overflow-y:auto;"></div>
+        </div>
+      </div>
+
+      <!-- Projets sans réponse (table) -->
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <div style="font-size:15px;font-weight:600;color:var(--text);">⚠️ Projets sans réponse depuis +7j</div>
+          <button class="btn btn-secondary" onclick="exportMarketCSV()">⬇️ Export CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Client</th><th>Titre du projet</th><th>Métier</th><th>Ville</th><th>Budget</th><th>Publié le</th><th>Âge</th></tr></thead>
+            <tbody id="mkt-stale-tbody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="mkt-stale-empty" style="display:none;">
+          <div class="es-icon">🎉</div>
+          <p>Tous les projets ont reçu au moins un devis !</p>
+        </div>
+      </div>
+    </div>
+
     <!-- ══ PAGE: ABONNEMENTS ══ -->
     <div class="page" id="page-subscriptions">
 
@@ -1259,6 +1332,7 @@ const titles = {
   finances: 'Finances & Revenus',
   analytics: 'Analytics Métier',
   moderation: 'Modération de contenu',
+  market: 'Marché & Opportunités',
   subscriptions: 'Gestion des abonnements',
   disputes: 'Litiges & Remboursements',
   communication: 'Communication',
@@ -1402,6 +1476,7 @@ function showPage(id, el) {
     case 'finances': loadFinances(); break;
     case 'analytics': loadAnalytics(); break;
     case 'moderation': loadModeration(1); break;
+    case 'market': loadMarket(); break;
     case 'subscriptions': loadSubStats(); loadSubscriptions(1); break;
     case 'disputes': loadDisputeStats(); loadDisputes(1); break;
     case 'communication': loadCommunication(); break;
@@ -3385,6 +3460,159 @@ function getTradeEmoji(trade) {
   if (t.includes('carreleur')) return '🔲';
   if (t.includes('menuisier')) return '🪚';
   return '👷';
+}
+
+// ══════════════════════════════════════════════════════════════
+// MARCHÉ & OPPORTUNITÉS
+// ══════════════════════════════════════════════════════════════
+
+let marketData = null;
+
+async function loadMarket() {
+  try {
+    const d = await apiCall('/admin/market');
+    marketData = d;
+    const k = d.kpis;
+    const shortLabels = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+
+    // ── KPIs ──
+    document.getElementById('mkt-open').textContent        = formatNumber(k.totalOpenProjects);
+    document.getElementById('mkt-stale').textContent       = formatNumber(k.openStale);
+    document.getElementById('mkt-coverage').textContent    = k.coverageRate + '%';
+    document.getElementById('mkt-delay').textContent       = k.avgHoursToFirstQuote != null ? k.avgHoursToFirstQuote + 'h' : '--';
+    document.getElementById('mkt-budget-min').textContent  = formatCurrency(k.avgBudgetMin) + ' FCFA';
+    document.getElementById('mkt-budget-max').textContent  = formatCurrency(k.avgBudgetMax) + ' FCFA';
+    document.getElementById('mkt-pros').textContent        = formatNumber(k.totalPros);
+    document.getElementById('mkt-verified-pros').textContent = formatNumber(k.verifiedPros);
+
+    // ── Graphique projets par mois ──
+    const months = Object.entries(d.projectsByMonth || {});
+    const maxVal = Math.max(...months.map(([,v]) => v), 1);
+    const total12 = months.reduce((a,[,v]) => a + v, 0);
+    document.getElementById('mkt-chart-label').textContent = total12 + ' projets créés sur les 12 derniers mois';
+    document.getElementById('mkt-bar-chart').innerHTML = months.map(([key, v]) => {
+      const h = Math.max(4, (v / maxVal) * 90);
+      return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;">'
+        + '<div style="font-size:9px;color:var(--muted);">' + (v > 0 ? v : '') + '</div>'
+        + '<div style="width:100%;border-radius:3px 3px 0 0;background:linear-gradient(180deg,var(--blue),rgba(59,130,246,0.3));height:' + h + 'px;transition:height .5s;" title="' + key + ' : ' + v + ' projet(s)"></div>'
+        + '</div>';
+    }).join('');
+    document.getElementById('mkt-bar-labels').innerHTML = months.map(([key]) => {
+      const m = parseInt(key.split('-')[1]) - 1;
+      return '<div style="flex:1;text-align:center;font-size:9px;color:var(--muted);">' + shortLabels[m] + '</div>';
+    }).join('');
+
+    // ── Demande vs offre par métier ──
+    const maxDemand = Math.max(...(d.tradeBalance || []).map(t => t.demand), 1);
+    document.getElementById('mkt-trade-balance').innerHTML = (d.tradeBalance || []).map(t => {
+      const pctBar = Math.max(2, (t.demand / maxDemand) * 100);
+      const ratio  = t.supply > 0 ? t.ratio : '∞';
+      const ratioColor = !t.supply ? 'red' : parseFloat(t.ratio) > 3 ? 'orange' : 'green';
+      return '<div>'
+        + '<div style="display:flex;justify-content:space-between;margin-bottom:3px;">'
+        + '<span style="font-size:12px;color:var(--text);">' + escHtml(t.trade) + '</span>'
+        + '<span style="font-size:11px;">'
+        + '<span style="color:var(--blue);">' + t.demand + ' proj</span>'
+        + ' · <span style="color:var(--muted);">' + t.supply + ' pros</span>'
+        + ' · <span style="color:var(--' + ratioColor + ');font-weight:600;" title="Ratio demande/pros">' + ratio + '</span>'
+        + '</span></div>'
+        + '<div style="background:var(--dark2);border-radius:3px;height:5px;">'
+        + '<div style="background:var(--blue);border-radius:3px;height:100%;width:' + pctBar + '%;"></div>'
+        + '</div></div>';
+    }).join('') || '<span style="color:var(--muted);font-size:13px;">Aucune donnée</span>';
+
+    // ── Budget par métier ──
+    document.getElementById('mkt-budget-tbody').innerHTML = (d.budgetByTrade || []).map(t =>
+      '<tr>'
+      + '<td>' + escHtml(t.trade) + '</td>'
+      + '<td style="text-align:center;">' + t.count + '</td>'
+      + '<td style="color:var(--green);">' + formatCurrency(t.avgMin) + ' FCFA</td>'
+      + '<td style="color:var(--orange);">' + formatCurrency(t.avgMax) + ' FCFA</td>'
+      + '</tr>'
+    ).join('') || '<tr><td colspan="4" style="color:var(--muted);text-align:center;">Aucune donnée budget</td></tr>';
+
+    // ── Villes : demande vs offre ──
+    const maxCity = Math.max(...(d.cityMarket || []).map(c => c.demand), 1);
+    document.getElementById('mkt-city-bars').innerHTML = (d.cityMarket || []).map(c => {
+      const pct   = Math.max(2, (c.demand / maxCity) * 100);
+      const gap   = c.supply === 0 ? 'red' : c.demand > c.supply * 2 ? 'orange' : 'green';
+      const gapLabel = c.supply === 0 ? '⚠️ 0 pro' : c.demand > c.supply * 2 ? '⚠️ sous-couvert' : '✅ couvert';
+      return '<div>'
+        + '<div style="display:flex;justify-content:space-between;margin-bottom:3px;">'
+        + '<span style="font-size:12px;color:var(--text);">' + escHtml(c.city) + '</span>'
+        + '<span style="font-size:11px;">'
+        + '<span style="color:var(--blue);">' + c.demand + ' proj</span>'
+        + ' · <span style="color:var(--muted);">' + c.supply + ' pros</span>'
+        + ' · <span style="color:var(--' + gap + ');">' + gapLabel + '</span>'
+        + '</span></div>'
+        + '<div style="background:var(--dark2);border-radius:3px;height:5px;">'
+        + '<div style="background:var(--' + gap + ');border-radius:3px;height:100%;width:' + pct + '%;"></div>'
+        + '</div></div>';
+    }).join('') || '<span style="color:var(--muted);font-size:13px;">Aucune donnée</span>';
+
+    // ── Projets sans réponse ──
+    const stale = d.staleProjects || [];
+    const staleEmpty = document.getElementById('mkt-stale-empty');
+    const staleTbody = document.getElementById('mkt-stale-tbody');
+    if (stale.length === 0) {
+      staleTbody.innerHTML = '';
+      staleEmpty.style.display = '';
+    } else {
+      staleEmpty.style.display = 'none';
+      staleTbody.innerHTML = stale.map(p => {
+        const ageDays = Math.floor((new Date() - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
+        const budget  = (p.budgetMin || p.budgetMax)
+          ? formatCurrency(p.budgetMin || 0) + ' – ' + formatCurrency(p.budgetMax || 0) + ' FCFA'
+          : '--';
+        const client  = p.client ? escHtml(p.client.firstName + ' ' + p.client.lastName) : '--';
+        return '<tr>'
+          + '<td><strong>' + client + '</strong><br><span style="font-size:11px;color:var(--muted);">' + escHtml(p.client?.email || '') + '</span></td>'
+          + '<td>' + escHtml(p.title) + '</td>'
+          + '<td>' + escHtml(p.tradeNeeded) + '</td>'
+          + '<td>' + escHtml(p.city) + '</td>'
+          + '<td style="font-size:12px;">' + budget + '</td>'
+          + '<td style="font-size:12px;color:var(--muted);">' + new Date(p.createdAt).toLocaleDateString('fr-FR') + '</td>'
+          + '<td><span style="color:var(--red);font-weight:600;">' + ageDays + 'j</span></td>'
+          + '</tr>';
+      }).join('');
+    }
+  } catch (err) {
+    showToast('Erreur chargement marché', true);
+  }
+}
+
+async function exportMarketCSV() {
+  try {
+    if (!marketData || !marketData.staleProjects) {
+      showToast('Chargez d\'abord la page', true); return;
+    }
+    const rows = marketData.staleProjects;
+    if (rows.length === 0) { showToast('Aucun projet sans réponse à exporter', true); return; }
+    const headers = ['Client', 'Email', 'Titre', 'Métier', 'Ville', 'Budget min (FCFA)', 'Budget max (FCFA)', 'Publié le', 'Âge (jours)'];
+    const csvRows = rows.map(p => {
+      const ageDays = Math.floor((new Date() - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
+      return [
+        (p.client?.firstName || '') + ' ' + (p.client?.lastName || ''),
+        p.client?.email || '',
+        p.title,
+        p.tradeNeeded,
+        p.city,
+        p.budgetMin || '',
+        p.budgetMax || '',
+        new Date(p.createdAt).toLocaleDateString('fr-FR'),
+        ageDays,
+      ].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',');
+    });
+    const csv = '﻿' + headers.join(',') + '\n' + csvRows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'manawa_marche_opportunites.csv'; a.click();
+    URL.revokeObjectURL(url);
+    showToast('✅ Export CSV téléchargé');
+  } catch (err) {
+    showToast('Erreur export', true);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════

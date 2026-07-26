@@ -1747,6 +1747,172 @@ router.get('/analytics', async (req, res, next) => {
 });
 
 // ──────────────────────────────────────────────────────────────
+// MARCHÉ & OPPORTUNITÉS
+// ──────────────────────────────────────────────────────────────
+
+// GET /api/admin/market
+router.get('/market', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    // ── KPIs globaux ──────────────────────────────────────────
+    const [
+      totalOpenProjects,
+      openWithoutQuote,
+      openStale,          // OPEN depuis > 7j sans aucun devis
+      avgBudgetAgg,
+      totalPros,
+      verifiedPros,
+    ] = await Promise.all([
+      prisma.project.count({ where: { status: 'OPEN' } }),
+      prisma.project.count({ where: { status: 'OPEN', quotes: { none: {} } } }),
+      prisma.project.count({
+        where: { status: 'OPEN', createdAt: { lt: sevenDaysAgo }, quotes: { none: {} } },
+      }),
+      prisma.project.aggregate({
+        _avg: { budgetMin: true, budgetMax: true },
+        where: { budgetMin: { not: null } },
+      }),
+      prisma.professional.count(),
+      prisma.professional.count({ where: { verifiedByAdmin: true } }),
+    ]);
+
+    // ── Demande vs offre par métier ───────────────────────────
+    const [projectsByTrade, prosByTrade] = await Promise.all([
+      prisma.project.groupBy({
+        by: ['tradeNeeded'],
+        _count: { id: true },
+        orderBy: { _count: { id: 'desc' } },
+        take: 15,
+      }),
+      prisma.professional.groupBy({
+        by: ['trade'],
+        _count: { id: true },
+      }),
+    ]);
+
+    const prosByTradeMap = Object.fromEntries(prosByTrade.map(p => [p.trade, p._count.id]));
+    const tradeBalance = projectsByTrade.map(t => ({
+      trade:    t.tradeNeeded,
+      demand:   t._count.id,
+      supply:   prosByTradeMap[t.tradeNeeded] || 0,
+      ratio:    prosByTradeMap[t.tradeNeeded]
+        ? (t._count.id / prosByTradeMap[t.tradeNeeded]).toFixed(2)
+        : null,
+    }));
+
+    // ── Budget moyen par métier (top 10) ─────────────────────
+    const budgetByTrade = await prisma.project.groupBy({
+      by: ['tradeNeeded'],
+      _avg: { budgetMin: true, budgetMax: true },
+      _count: { id: true },
+      where: { budgetMin: { not: null } },
+      orderBy: { _count: { id: 'desc' } },
+      take: 10,
+    });
+
+    // ── Répartition géographique projets OPEN ────────────────
+    const [cityDemand, citySupply] = await Promise.all([
+      prisma.project.groupBy({
+        by: ['city'],
+        _count: { id: true },
+        where: { status: 'OPEN', city: { not: '' } },
+        orderBy: { _count: { id: 'desc' } },
+        take: 15,
+      }),
+      prisma.professional.groupBy({
+        by: ['city'],
+        _count: { id: true },
+        where: { city: { not: null } },
+      }).catch(() => []),
+    ]);
+
+    const citySupplyMap = Object.fromEntries(
+      (citySupply || []).map(c => [c.city, c._count.id])
+    );
+    const cityMarket = cityDemand.map(c => ({
+      city:   c.city,
+      demand: c._count.id,
+      supply: citySupplyMap[c.city] || 0,
+    }));
+
+    // ── Projets sans réponse publiés les 30 derniers jours ───
+    const staleProjects = await prisma.project.findMany({
+      where: { status: 'OPEN', createdAt: { lt: sevenDaysAgo, gte: thirtyDaysAgo }, quotes: { none: {} } },
+      select: {
+        id: true, title: true, tradeNeeded: true, city: true,
+        budgetMin: true, budgetMax: true, createdAt: true,
+        client: { select: { firstName: true, lastName: true, email: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 50,
+    });
+
+    // ── Temps moyen avant premier devis (en heures) ──────────
+    const quotedProjects = await prisma.project.findMany({
+      where: { quotes: { some: {} } },
+      select: {
+        createdAt: true,
+        quotes: { select: { createdAt: true }, orderBy: { createdAt: 'asc' }, take: 1 },
+      },
+      take: 500,
+      orderBy: { createdAt: 'desc' },
+    });
+    const delays = quotedProjects
+      .filter(p => p.quotes.length > 0)
+      .map(p => (new Date(p.quotes[0].createdAt) - new Date(p.createdAt)) / (1000 * 60 * 60));
+    const avgHoursToFirstQuote = delays.length > 0
+      ? Math.round(delays.reduce((a, b) => a + b, 0) / delays.length)
+      : null;
+
+    // ── Évolution projets OPEN par mois (12 mois) ────────────
+    const projectsByMonth = {};
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      projectsByMonth[key] = 0;
+    }
+    const recentProjects = await prisma.project.findMany({
+      where: { createdAt: { gte: new Date(now.getFullYear(), now.getMonth() - 11, 1) } },
+      select: { createdAt: true },
+    });
+    for (const p of recentProjects) {
+      const d = new Date(p.createdAt);
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      if (projectsByMonth[key] !== undefined) projectsByMonth[key]++;
+    }
+
+    res.json({
+      kpis: {
+        totalOpenProjects,
+        openWithoutQuote,
+        openStale,
+        coverageRate: totalOpenProjects > 0
+          ? Math.round(((totalOpenProjects - openWithoutQuote) / totalOpenProjects) * 100)
+          : 0,
+        avgBudgetMin: Math.round(avgBudgetAgg._avg.budgetMin || 0),
+        avgBudgetMax: Math.round(avgBudgetAgg._avg.budgetMax || 0),
+        avgHoursToFirstQuote,
+        totalPros,
+        verifiedPros,
+      },
+      tradeBalance,
+      budgetByTrade: budgetByTrade.map(t => ({
+        trade:    t.tradeNeeded,
+        count:    t._count.id,
+        avgMin:   Math.round(t._avg.budgetMin || 0),
+        avgMax:   Math.round(t._avg.budgetMax || 0),
+      })),
+      cityMarket,
+      staleProjects,
+      projectsByMonth,
+    });
+  } catch (err) { next(err); }
+});
+
+// ──────────────────────────────────────────────────────────────
 // GESTION DES ABONNEMENTS
 // ──────────────────────────────────────────────────────────────
 

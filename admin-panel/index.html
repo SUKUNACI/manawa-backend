@@ -2548,42 +2548,65 @@ async function exportCurrentPage() {
 
     if (currentPage === 'professionals') {
       showToast('Export en cours…');
-      const data = await apiCall('/admin/professionals?limit=100');
-      headers = ['ID', 'Prénom', 'Nom', 'Email', 'Téléphone', 'Métier', 'Ville', 'Statut ID', 'Premium', 'Inscrit le'];
+      const trade  = document.getElementById('pros-trade-filter')?.value  || '';
+      const status = document.getElementById('pros-status-filter')?.value || '';
+      const search = document.getElementById('pros-search')?.value.trim() || '';
+      const params = new URLSearchParams({ limit: 5000 });
+      if (trade)  params.set('trade', trade);
+      if (status) params.set('identityStatus', status);
+      if (search) params.set('search', search);
+      const data = await apiCall('/admin/professionals?' + params);
+      headers = ['ID', 'Prénom', 'Nom', 'Email', 'Téléphone', 'Métier', 'Ville', 'Statut ID', 'Décennale', 'Premium', 'Score confiance', 'Inscrit le'];
       rows = (data.professionals || []).map(p => [
         p.user.id, p.user.firstName, p.user.lastName, p.user.email, p.user.phone || '',
         p.trade || '', p.user.city || '', p.identityStatus,
+        p.decennaleVerified ? 'Oui' : 'Non',
         p.subscription && p.subscription.status === 'ACTIVE' ? 'Oui' : 'Non',
-        new Date(p.user.createdAt).toLocaleDateString('fr-FR')
+        p.trustScore?.total ?? '',
+        new Date(p.user.createdAt).toLocaleDateString('fr-FR'),
       ]);
-      filename = 'professionnels_' + new Date().toISOString().slice(0,10) + '.csv';
+      const suffix = [trade, status, search].filter(Boolean).join('_').replace(/\s+/g, '-').toLowerCase();
+      filename = 'professionnels' + (suffix ? '_' + suffix : '') + '_' + new Date().toISOString().slice(0,10) + '.csv';
 
     } else if (currentPage === 'clients') {
       showToast('Export en cours…');
-      const data = await apiCall('/admin/users?role=CLIENT&limit=100');
-      headers = ['ID', 'Prénom', 'Nom', 'Email', 'Téléphone', 'Ville', 'Statut', 'Inscrit le'];
+      const search = document.getElementById('clients-search')?.value.trim() || '';
+      const params = new URLSearchParams({ role: 'CLIENT', limit: 5000 });
+      if (search) params.set('search', search);
+      const data = await apiCall('/admin/users?' + params);
+      headers = ['ID', 'Prénom', 'Nom', 'Email', 'Téléphone', 'Ville', 'Email vérifié', 'Statut', 'Inscrit le'];
       rows = (data.users || []).map(u => [
         u.id, u.firstName, u.lastName, u.email, u.phone || '',
-        u.city || '', u.suspended ? 'Suspendu' : 'Actif',
-        new Date(u.createdAt).toLocaleDateString('fr-FR')
+        u.city || '', u.emailVerified ? 'Oui' : 'Non',
+        u.suspended ? 'Suspendu' : 'Actif',
+        new Date(u.createdAt).toLocaleDateString('fr-FR'),
       ]);
-      filename = 'clients_' + new Date().toISOString().slice(0,10) + '.csv';
+      filename = 'clients' + (search ? '_' + search.replace(/\s+/g, '-').toLowerCase() : '') + '_' + new Date().toISOString().slice(0,10) + '.csv';
 
     } else if (currentPage === 'payments') {
       showToast('Export en cours…');
-      const data = await apiCall('/admin/payments?limit=100&status=succeeded');
-      headers = ['ID', 'Montant (FCFA)', 'Type', 'Statut', 'Professionnel', 'Projet', 'Ref GeniusPay', 'Date'];
+      const status = document.getElementById('pay-status-filter')?.value || '';
+      const type   = document.getElementById('pay-type-filter')?.value   || '';
+      const search = document.getElementById('pay-search')?.value.trim() || '';
+      const params = new URLSearchParams({ limit: 5000 });
+      if (status) params.set('status', status);
+      if (type)   params.set('type', type);
+      if (search) params.set('search', search);
+      const data = await apiCall('/admin/payments?' + params);
+      headers = ['ID', 'Montant (FCFA)', 'Type', 'Statut', 'Professionnel', 'Email pro', 'Projet', 'Ref GeniusPay', 'Date'];
       rows = (data.payments || []).map(p => {
-        const proName = p.quote && p.quote.professional && p.quote.professional.user
-          ? p.quote.professional.user.firstName + ' ' + p.quote.professional.user.lastName : '';
-        const projectTitle = p.quote && p.quote.project ? p.quote.project.title : '';
+        const pro = p.quote?.professional?.user;
+        const proName  = pro ? pro.firstName + ' ' + pro.lastName : '';
+        const proEmail = pro ? pro.email : '';
+        const projectTitle = p.quote?.project?.title || '';
         return [
           p.id, p.amount, p.isDeposit ? 'Acompte 30%' : 'Solde 70%', p.status,
-          proName, projectTitle, p.geniuspayRef || '',
-          new Date(p.createdAt).toLocaleDateString('fr-FR')
+          proName, proEmail, projectTitle, p.geniuspayRef || '',
+          new Date(p.createdAt).toLocaleDateString('fr-FR'),
         ];
       });
-      filename = 'paiements_' + new Date().toISOString().slice(0,10) + '.csv';
+      const suffix = [status, type].filter(Boolean).join('_');
+      filename = 'paiements' + (suffix ? '_' + suffix.toLowerCase() : '') + '_' + new Date().toISOString().slice(0,10) + '.csv';
 
     } else if (currentPage === 'finances') {
       exportFinancesCSV();
@@ -2593,7 +2616,7 @@ async function exportCurrentPage() {
     if (rows.length === 0) { showToast('Aucune donnée à exporter', true); return; }
 
     const csv = [headers, ...rows].map(r =>
-      r.map(v => '"' + String(v || '').replace(/"/g, '""') + '"').join(',')
+      r.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(',')
     ).join('\n');
 
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -2601,7 +2624,7 @@ async function exportCurrentPage() {
     const a = document.createElement('a');
     a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
-    showToast('Export téléchargé : ' + filename);
+    showToast('Export téléchargé — ' + rows.length + ' lignes');
   } catch (err) {
     showToast('Erreur export : ' + err.message, true);
   }

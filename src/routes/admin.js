@@ -125,7 +125,7 @@ router.get('/dashboard', async (req, res, next) => {
 router.get('/users', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit) || 20));
     const skip = (page - 1) * limit;
     const { search, role } = req.query;
 
@@ -432,7 +432,7 @@ router.post('/users/:id/reset-password', async (req, res, next) => {
 router.get('/professionals', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit) || 20));
     const skip = (page - 1) * limit;
     const { trade, city, identityStatus, premium, search } = req.query;
 
@@ -882,7 +882,7 @@ router.delete('/projects/:id', async (req, res, next) => {
 router.get('/payments', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit) || 20));
     const skip = (page - 1) * limit;
     const { status, dateFrom, dateTo, amountMin, amountMax, search, isDeposit } = req.query;
 

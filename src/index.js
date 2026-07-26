@@ -52,13 +52,17 @@ const allowedOrigins = process.env.CORS_ORIGINS
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
-// CSP désactivé pour /admin (scripts inline + 260 onclick dans le dashboard)
-// CSP Helmet actif sur toutes les autres routes (API, etc.)
-app.use('/admin', helmet({
-  contentSecurityPolicy: false,
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
-}));
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+// Helmet avec CSP désactivé sur /admin (262 onclick + scripts externes)
+// Sur toutes les autres routes le CSP par défaut de Helmet reste actif
+app.use((req, res, next) => {
+  if (req.path.startsWith('/admin')) {
+    return helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    })(req, res, next);
+  }
+  return helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } })(req, res, next);
+});
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 
@@ -126,7 +130,7 @@ app.use('/api/disputes', disputeRoutes);
 // Le dashboard (index.html, 400KB+) est servi uniquement après vérification du cookie httpOnly
 const adminPanelAuth = (req, res, next) => {
   // Seule la page de login est publique
-  if (req.path === '/login.html' || req.path === '/login' || req.path === '/login.js') return next();
+  if (req.path === '/login.html' || req.path === '/login' || req.path === '/login.js' || req.path === '/dashboard.js') return next();
 
   // Toute autre requête (y compris /) requiert le cookie httpOnly posé au login
   const token = req.cookies?.adminToken;

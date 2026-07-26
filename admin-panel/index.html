@@ -247,6 +247,7 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
     <span class="ni">🛡️</span> Modération
     <span class="nav-badge" id="badge-moderation" style="display:none;">0</span>
   </div>
+  <div class="nav-item" onclick="showPage('communication',this)"><span class="ni">📡</span> Communication</div>
   <div class="nav-item" onclick="showPage('support',this)">
     <span class="ni">🎧</span> Support
     <span class="nav-badge orange" id="badge-support" style="display:none;">0</span>
@@ -850,6 +851,104 @@ td.td-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;}
       </div>
     </div>
 
+    <!-- ══ PAGE: COMMUNICATION ══ -->
+    <div class="page" id="page-communication">
+      <!-- KPIs -->
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px;">
+        <div class="kpi blue"><div class="kpi-icon">💬</div><div class="kpi-val" id="com-messages-30d">--</div><div class="kpi-label">Messages (30 derniers jours)</div></div>
+        <div class="kpi green"><div class="kpi-icon">🔔</div><div class="kpi-val" id="com-notifs-30d">--</div><div class="kpi-label">Notifications (30j)</div></div>
+        <div class="kpi orange"><div class="kpi-icon">📱</div><div class="kpi-val" id="com-devices">--</div><div class="kpi-label">Appareils actifs</div></div>
+        <div class="kpi purple"><div class="kpi-icon">📡</div><div class="kpi-val" id="com-broadcasts">--</div><div class="kpi-label">Broadcasts envoyés</div></div>
+      </div>
+
+      <!-- Stats détaillées -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+        <!-- Messagerie -->
+        <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+          <div style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);">💬 Messagerie</div>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--dark2);border-radius:10px;">
+              <span style="color:var(--muted);font-size:13px;">Total messages</span>
+              <span id="com-messages-total" style="font-weight:600;color:var(--text);">--</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--dark2);border-radius:10px;">
+              <span style="color:var(--muted);font-size:13px;">Conversations actives (30j)</span>
+              <span id="com-conversations" style="font-weight:600;color:var(--blue);">--</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Notifications -->
+        <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+          <div style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);">🔔 Notifications</div>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--dark2);border-radius:10px;">
+              <span style="color:var(--muted);font-size:13px;">Total envoyées</span>
+              <span id="com-notifs-total" style="font-weight:600;color:var(--text);">--</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--dark2);border-radius:10px;">
+              <span style="color:var(--muted);font-size:13px;">Non lues</span>
+              <span id="com-notifs-unread" style="font-weight:600;color:var(--orange);">--</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Appareils par plateforme -->
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:24px;">
+        <div style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);">📱 Appareils enregistrés</div>
+        <div id="com-devices-breakdown" style="display:flex;gap:16px;flex-wrap:wrap;"></div>
+      </div>
+
+      <!-- Broadcast push -->
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:24px;">
+        <div style="font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);">📡 Envoyer une notification push</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+          <div>
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Titre *</label>
+            <input id="com-notif-title" class="filter-input" placeholder="Ex: Nouvelle fonctionnalité..." style="width:100%;box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Cible</label>
+            <select id="com-notif-target" class="filter-select" onchange="toggleUserIdField()" style="width:100%;box-sizing:border-box;">
+              <option value="ALL">Tous les utilisateurs</option>
+              <option value="CLIENTS">Clients uniquement</option>
+              <option value="PROFESSIONALS">Professionnels uniquement</option>
+              <option value="USER">Utilisateur précis</option>
+            </select>
+          </div>
+        </div>
+        <div id="com-user-id-field" style="display:none;margin-bottom:12px;">
+          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">ID ou email de l'utilisateur</label>
+          <input id="com-target-user" class="filter-input" placeholder="ID utilisateur ou email..." style="width:100%;box-sizing:border-box;">
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Message *</label>
+          <textarea id="com-notif-body" class="filter-input" placeholder="Contenu de la notification..." rows="3" style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:13px;"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="sendBroadcast()">📡 Envoyer la notification</button>
+      </div>
+
+      <!-- Historique broadcasts -->
+      <div style="background:var(--dark3);border:1px solid var(--border);border-radius:16px;padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <div style="font-size:15px;font-weight:600;color:var(--text);">📋 Historique des broadcasts</div>
+          <button class="btn btn-secondary" onclick="loadBroadcastHistory(1)">🔄 Rafraîchir</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Titre</th><th>Message</th><th>Cible</th><th>Envoyés / Total</th></tr></thead>
+            <tbody id="com-broadcasts-tbody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="com-broadcasts-empty" style="display:none;">
+          <div class="es-icon">📡</div>
+          <p>Aucun broadcast envoyé</p>
+        </div>
+        <div class="pagination" id="com-broadcasts-pagination"></div>
+      </div>
+    </div>
+
     <!-- ══ PAGE: COMPTES SUPPRIMÉS ══ -->
     <div class="page" id="page-deleted">
       <div class="filters">
@@ -962,6 +1061,7 @@ const titles = {
   finances: 'Finances & Revenus',
   analytics: 'Analytics Métier',
   moderation: 'Modération de contenu',
+  communication: 'Communication',
   support: 'Support',
   deleted: 'Comptes supprimés'
 };
@@ -1101,6 +1201,7 @@ function showPage(id, el) {
     case 'finances': loadFinances(); break;
     case 'analytics': loadAnalytics(); break;
     case 'moderation': loadModeration(1); break;
+    case 'communication': loadCommunication(); break;
     case 'support': loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
   }
@@ -2587,6 +2688,7 @@ async function loadFinances() {
     document.getElementById('fin-commissions-percues').textContent = formatCurrency(data.commissionsPercues) + ' FCFA';
     document.getElementById('fin-active-subs').textContent = formatNumber(data.activeSubscriptions);
     document.getElementById('fin-sub-revenue').textContent = formatCurrency(data.estimatedSubRevenue) + ' FCFA';
+    document.getElementById('fin-commission-rate').textContent = (data.commissionRate * 100).toFixed(0) + '%';
 
     // Graphique barres double (transactions + commissions)
     const months = Object.entries(data.revenueByMonth || {});
@@ -2743,7 +2845,7 @@ async function toggleOneCommission(paymentId) {
 async function exportFinancesCSV() {
   try {
     showToast('Export en cours…');
-    const data = await apiCall('/admin/finances/commissions?limit=500');
+    const data = await apiCall('/admin/finances/commissions?limit=1000');
     const headers = ['Professionnel', 'Email', 'Métier', 'CA Total (FCFA)', 'Commission Totale (FCFA)', 'Due (FCFA)', 'Perçue (FCFA)', 'Statut'];
     const rows = (data.professionals || []).map(pro => {
       const u = pro.user;
@@ -3080,6 +3182,124 @@ function getTradeEmoji(trade) {
   if (t.includes('carreleur')) return '🔲';
   if (t.includes('menuisier')) return '🪚';
   return '👷';
+}
+
+// ══════════════════════════════════════════════════════════════
+// COMMUNICATION
+// ══════════════════════════════════════════════════════════════
+
+async function loadCommunication() {
+  try {
+    const data = await apiCall('/admin/communication/stats');
+
+    document.getElementById('com-messages-30d').textContent    = formatNumber(data.messages.last30d);
+    document.getElementById('com-notifs-30d').textContent      = formatNumber(data.notifications.last30d);
+    document.getElementById('com-devices').textContent         = formatNumber(data.devices.active);
+    document.getElementById('com-broadcasts').textContent      = formatNumber(data.broadcasts.total);
+    document.getElementById('com-messages-total').textContent  = formatNumber(data.messages.total);
+    document.getElementById('com-conversations').textContent   = formatNumber(data.messages.activeConversations);
+    document.getElementById('com-notifs-total').textContent    = formatNumber(data.notifications.total);
+    document.getElementById('com-notifs-unread').textContent   = formatNumber(data.notifications.unread);
+
+    // Appareils par plateforme
+    const platformColors = { ANDROID: 'green', iOS: 'blue', FCM: 'orange', EXPO: 'purple', APNs: 'blue' };
+    document.getElementById('com-devices-breakdown').innerHTML =
+      (data.devices.byPlatform || []).map(d =>
+        '<div style="background:var(--dark2);border:1px solid var(--border);border-radius:10px;padding:12px 20px;text-align:center;">'
+        + '<div style="font-size:22px;font-weight:700;color:var(--' + (platformColors[d.platform] || 'text') + ');">' + formatNumber(d.count) + '</div>'
+        + '<div style="font-size:12px;color:var(--muted);margin-top:4px;">' + escHtml(d.platform) + '</div>'
+        + '</div>'
+      ).join('') || '<span style="color:var(--muted);font-size:13px;">Aucun appareil enregistré</span>';
+
+    await loadBroadcastHistory(1);
+  } catch (err) {
+    showToast('Erreur chargement communication', true);
+  }
+}
+
+async function loadBroadcastHistory(page) {
+  try {
+    const data = await apiCall('/admin/communication/broadcasts?page=' + page + '&limit=20');
+    const tbody = document.getElementById('com-broadcasts-tbody');
+    const empty = document.getElementById('com-broadcasts-empty');
+    const pagination = document.getElementById('com-broadcasts-pagination');
+
+    const logs = data.logs || [];
+    if (logs.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = '';
+      pagination.innerHTML = '';
+      return;
+    }
+    empty.style.display = 'none';
+
+    const targetLabels = { ALL: '👥 Tous', CLIENTS: '🏠 Clients', PROFESSIONALS: '🔧 Pros', USER: '👤 Utilisateur' };
+    tbody.innerHTML = logs.map(l => {
+      const rate = l.total > 0 ? Math.round((l.sent / l.total) * 100) : 0;
+      const rateColor = rate >= 80 ? 'green' : rate >= 50 ? 'orange' : 'red';
+      return '<tr>'
+        + '<td style="font-size:12px;color:var(--muted);">' + new Date(l.createdAt).toLocaleString('fr-FR') + '</td>'
+        + '<td style="font-weight:600;">' + escHtml(l.title) + '</td>'
+        + '<td style="max-width:220px;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escHtml(l.body) + '">' + escHtml(l.body) + '</td>'
+        + '<td><span class="badge badge-blue">' + (targetLabels[l.target] || l.target) + '</span></td>'
+        + '<td><span style="color:var(--' + rateColor + ');font-weight:600;">' + l.sent + ' / ' + l.total + '</span> <span style="color:var(--muted);font-size:11px;">(' + rate + '%)</span></td>'
+        + '</tr>';
+    }).join('');
+
+    // Pagination
+    if (data.totalPages > 1) {
+      let html = '';
+      if (page > 1) html += '<button class="btn btn-secondary" onclick="loadBroadcastHistory(' + (page-1) + ')">← Précédent</button>';
+      html += '<span style="color:var(--muted);font-size:13px;">Page ' + page + ' / ' + data.totalPages + '</span>';
+      if (page < data.totalPages) html += '<button class="btn btn-secondary" onclick="loadBroadcastHistory(' + (page+1) + ')">Suivant →</button>';
+      pagination.innerHTML = html;
+    } else {
+      pagination.innerHTML = '';
+    }
+  } catch (err) {
+    showToast('Erreur chargement historique', true);
+  }
+}
+
+function toggleUserIdField() {
+  const target = document.getElementById('com-notif-target').value;
+  document.getElementById('com-user-id-field').style.display = target === 'USER' ? '' : 'none';
+}
+
+async function sendBroadcast() {
+  const title  = document.getElementById('com-notif-title').value.trim();
+  const body   = document.getElementById('com-notif-body').value.trim();
+  const target = document.getElementById('com-notif-target').value;
+  const targetUser = document.getElementById('com-target-user').value.trim();
+
+  if (!title) { showToast('Le titre est requis', true); return; }
+  if (!body)  { showToast('Le message est requis', true); return; }
+  if (target === 'USER' && !targetUser) { showToast('Saisissez un ID utilisateur', true); return; }
+
+  const targetLabels = { ALL: 'tous les utilisateurs', CLIENTS: 'tous les clients', PROFESSIONALS: 'tous les professionnels', USER: 'un utilisateur précis' };
+  const confirmed = confirm('Envoyer "' + title + '" à ' + targetLabels[target] + ' ?');
+  if (!confirmed) return;
+
+  try {
+    showToast('Envoi en cours…');
+    const payload = { title, body, target };
+    if (target === 'USER') payload.targetUserId = targetUser;
+
+    const res = await apiCall('/admin/communication/broadcast', { method: 'POST', body: JSON.stringify(payload) });
+    showToast('✅ Notification envoyée — ' + res.sent + ' / ' + res.total + ' appareils atteints');
+
+    // Vider les champs
+    document.getElementById('com-notif-title').value = '';
+    document.getElementById('com-notif-body').value  = '';
+    document.getElementById('com-target-user').value = '';
+    document.getElementById('com-notif-target').value = 'ALL';
+    toggleUserIdField();
+
+    // Rafraîchir les stats et l'historique
+    loadCommunication();
+  } catch (err) {
+    showToast('Erreur : ' + (err.message || 'Envoi échoué'), true);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════

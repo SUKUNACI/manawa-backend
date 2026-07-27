@@ -4,6 +4,7 @@ const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { sendPushNotification } = require('../config/pushNotifications');
 const generateQuotePdf = require('../utils/generateQuotePdf');
+const { cloudinary } = require('../config/cloudinary');
 const { getActiveTier, getTierConfig } = require('./subscriptions');
 
 const router = express.Router();
@@ -388,13 +389,31 @@ router.post('/:id/pdf', requireAuth, async (req, res, next) => {
     // Sauvegarder l'URL du PDF dans le devis
     await prisma.quote.update({ where: { id: quote.id }, data: { pdfUrl } });
 
-    res.json({ pdfUrl });
+    // Retourner une URL signée valable 1h
+    const publicId = extractPublicId(pdfUrl);
+    const signedUrl = publicId ? cloudinary.url(publicId, {
+      resource_type: 'raw',
+      type: 'upload',
+      sign_url: true,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    }) : pdfUrl;
+
+    res.json({ pdfUrl: signedUrl });
   } catch (err) {
     next(err);
   }
 });
 
-// GET /api/quotes/:id/pdf — Télécharger le PDF existant (ou le générer)
+// Extrait le public_id Cloudinary depuis une URL secure_url
+function extractPublicId(secureUrl) {
+  // ex: https://res.cloudinary.com/cloud/raw/upload/v123/manawa/quotes/devis-xxx-v1.pdf
+  const match = secureUrl.match(/\/upload\/(?:v\d+\/)?(.+)$/);
+  if (!match) return null;
+  // Retirer l'extension
+  return match[1].replace(/\.[^/.]+$/, '');
+}
+
+// GET /api/quotes/:id/pdf — Retourne une URL signée Cloudinary (valable 1h)
 router.get('/:id/pdf', requireAuth, async (req, res, next) => {
   try {
     const quote = await prisma.quote.findUnique({
@@ -420,6 +439,18 @@ router.get('/:id/pdf', requireAuth, async (req, res, next) => {
     if (!pdfUrl || !pdfUrl.startsWith('http')) {
       pdfUrl = await generateQuotePdf(quote, quote.professional, quote.project);
       await prisma.quote.update({ where: { id: quote.id }, data: { pdfUrl } });
+    }
+
+    // Générer une URL signée valable 1 heure pour contourner la restriction ACL Cloudinary
+    const publicId = extractPublicId(pdfUrl);
+    if (publicId) {
+      const signedUrl = cloudinary.url(publicId, {
+        resource_type: 'raw',
+        type: 'upload',
+        sign_url: true,
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+      });
+      return res.json({ pdfUrl: signedUrl });
     }
 
     res.json({ pdfUrl });

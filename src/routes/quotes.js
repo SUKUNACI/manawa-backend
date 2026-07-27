@@ -416,8 +416,8 @@ router.get('/:id/pdf', requireAuth, async (req, res, next) => {
 
     let pdfUrl = quote.pdfUrl;
 
-    // Si pas de PDF existant, le générer
-    if (!pdfUrl) {
+    // Régénérer si pas de PDF ou si l'URL stockée est un ancien chemin local
+    if (!pdfUrl || !pdfUrl.startsWith('http')) {
       pdfUrl = await generateQuotePdf(quote, quote.professional, quote.project);
       await prisma.quote.update({ where: { id: quote.id }, data: { pdfUrl } });
     }

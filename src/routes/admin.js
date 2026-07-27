@@ -915,7 +915,7 @@ router.get('/projects/:id', async (req, res, next) => {
         quotes: {
           include: {
             professional: { include: { user: { select: { firstName: true, lastName: true, email: true } } } },
-            payment: true,
+            payments: true,
           },
         },
         review: { include: { author: { select: { firstName: true, lastName: true } } } },

@@ -107,12 +107,8 @@ app.use('/api/verification', verificationRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/professionals', professionalRoutes);
-app.use('/api/quotes', quoteRoutes);
-app.use('/api/messages', messageRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/payments', paymentRoutes);
-// Injecte le cookie httpOnly adminToken comme Bearer header pour les routes /api/admin et /api/quotes
-// Le JWT ne transite plus par localStorage — résiste au vol XSS
+// Injecte le cookie httpOnly adminToken comme Bearer header
+// Appliqué sur /api/quotes ET /api/admin pour permettre l'accès depuis le back-office
 const injectAdminCookie = (req, res, next) => {
   const cookieToken = req.cookies?.adminToken;
   if (cookieToken && !req.headers.authorization) {
@@ -120,8 +116,11 @@ const injectAdminCookie = (req, res, next) => {
   }
   next();
 };
+app.use('/api/quotes', injectAdminCookie, quoteRoutes);
+app.use('/api/messages', messageRoutes);
+app.use('/api/reviews', reviewRoutes);
+app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', injectAdminCookie, adminRoutes);
-app.use('/api/quotes', injectAdminCookie);
 app.use('/api/support', supportRoutes);
 app.use('/api/portfolio-projects', portfolioProjectsRoutes);
 app.use('/api/notifications', notificationRoutes);

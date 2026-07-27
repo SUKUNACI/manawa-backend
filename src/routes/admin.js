@@ -1124,11 +1124,33 @@ router.get('/payments/:id', async (req, res, next) => {
 // GET /api/admin/payments/:id/audit-logs — journal d'audit d'un paiement
 router.get('/payments/:id/audit-logs', async (req, res, next) => {
   try {
-    const logs = await prisma.paymentAuditLog.findMany({
-      where: { paymentId: req.params.id },
-      orderBy: { createdAt: 'desc' },
-    });
-    res.json({ logs });
+    const [payment, logs] = await Promise.all([
+      prisma.payment.findUnique({
+        where: { id: req.params.id },
+        select: {
+          id: true,
+          amount: true,
+          status: true,
+          isDeposit: true,
+          geniuspayRef: true,
+          createdAt: true,
+          completedAt: true,
+          quote: {
+            select: {
+              id: true,
+              amount: true,
+              project: { select: { id: true, title: true } },
+              professional: { select: { user: { select: { firstName: true, lastName: true, email: true } } } },
+            },
+          },
+        },
+      }),
+      prisma.paymentAuditLog.findMany({
+        where: { paymentId: req.params.id },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+    res.json({ payment, logs });
   } catch (err) {
     next(err);
   }

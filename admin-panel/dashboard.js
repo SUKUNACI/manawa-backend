@@ -2138,31 +2138,87 @@ async function loadAuditLogs(page = 1) {
 async function viewPaymentAuditLog(paymentId) {
   try {
     const data = await apiCall('/admin/payments/' + paymentId + '/audit-logs');
-    if (!data.logs || data.logs.length === 0) {
-      showToast('Aucun journal d\'audit pour ce paiement');
-      return;
-    }
-    let html = '<div style="max-height:400px;overflow-y:auto;">';
-    data.logs.forEach(log => {
-      const fromBadge = getPaymentStatusBadge(log.fromStatus);
-      const toBadge = getPaymentStatusBadge(log.toStatus);
-      html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;">';
-      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">';
-      html += '<div style="display:flex;gap:6px;align-items:center;">' + fromBadge + '<span style="color:var(--muted);">→</span>' + toBadge + '</div>';
-      html += '<span style="font-size:11px;color:var(--muted);">' + formatDate(log.createdAt) + '</span>';
-      html += '</div>';
-      if (log.reason) html += '<p style="font-size:12px;color:var(--light);margin-bottom:4px;">Raison : ' + escHtml(log.reason.replace(/_/g, ' ')) + '</p>';
-      if (log.triggeredBy) html += '<p style="font-size:11px;color:var(--muted);">Déclenché par : ' + escHtml(log.triggeredBy) + '</p>';
-      if (log.metadata) {
-        try {
-          const meta = JSON.parse(log.metadata);
-          if (meta.expected !== undefined) html += '<p style="font-size:11px;color:var(--red);margin-top:4px;">⚠️ Attendu : ' + formatNumber(meta.expected) + ' FCFA — Reçu : ' + formatNumber(meta.received) + ' FCFA</p>';
-        } catch(e) {}
-      }
-      html += '</div>';
-    });
+    const pay = data.payment;
+    const logs = data.logs || [];
+
+    // ── En-tête paiement ──
+    const proName = pay?.quote?.professional?.user
+      ? escHtml(pay.quote.professional.user.firstName + ' ' + pay.quote.professional.user.lastName)
+      : '—';
+    const projectTitle = pay?.quote?.project?.title ? escHtml(pay.quote.project.title) : '—';
+    const typeBadge = pay ? (pay.isDeposit
+      ? '<span class="badge badge-orange">Acompte</span>'
+      : '<span class="badge badge-blue">Solde</span>') : '';
+    const statusBadge = pay ? getPaymentStatusBadge(pay.status) : '';
+
+    let html = '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:16px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">';
+    html += '<div>';
+    html += '<div style="font-size:18px;font-weight:700;color:var(--orange);margin-bottom:4px;">' + (pay ? formatNumber(pay.amount) + ' FCFA' : '—') + '</div>';
+    html += '<div style="font-size:12px;color:var(--muted);margin-bottom:6px;">📁 ' + projectTitle + ' &nbsp;·&nbsp; 👷 ' + proName + '</div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + typeBadge + ' ' + statusBadge + '</div>';
     html += '</div>';
-    document.getElementById('mp-title').textContent = 'Journal d\'audit — paiement ' + paymentId.substring(0, 8);
+    html += '<div style="text-align:right;font-size:11px;color:var(--muted);">';
+    if (pay?.geniuspayRef) html += '<div style="font-family:monospace;background:var(--dark4);padding:3px 8px;border-radius:6px;margin-bottom:4px;cursor:pointer;" onclick="navigator.clipboard.writeText(\'' + escAttr(pay.geniuspayRef) + '\');showToast(\'Réf. copiée\')" title="Copier la référence GeniusPay">🔗 ' + escHtml(pay.geniuspayRef.substring(0, 16)) + '…</div>';
+    if (pay?.createdAt) html += '<div>Créé le ' + formatDate(pay.createdAt) + '</div>';
+    if (pay?.completedAt) html += '<div style="color:var(--green);">Complété le ' + formatDate(pay.completedAt) + '</div>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+
+    // ── Timeline ──
+    if (logs.length === 0) {
+      html += '<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px;">Aucune entrée dans le journal pour ce paiement.</div>';
+    } else {
+      html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">' + logs.length + ' événement' + (logs.length > 1 ? 's' : '') + '</div>';
+      html += '<div style="position:relative;padding-left:24px;max-height:380px;overflow-y:auto;">';
+      html += '<div style="position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border);border-radius:2px;"></div>';
+      logs.forEach((log, i) => {
+        const isLast = i === logs.length - 1;
+        const fromBadge = getPaymentStatusBadge(log.fromStatus);
+        const toBadge = getPaymentStatusBadge(log.toStatus);
+        const isAnomaly = log.reason === 'amount_mismatch';
+        const isSuccess = log.toStatus === 'succeeded';
+        const dotColor = isAnomaly ? 'var(--red)' : isSuccess ? 'var(--green)' : 'var(--orange)';
+
+        // Déclencheur badge
+        const trigMap = { webhook: ['badge-blue','webhook'], cron_expiry: ['badge-yellow','cron'], cron: ['badge-yellow','cron'], reconciliation: ['badge-muted','réconcil.'], manual: ['badge-muted','manuel'], system: ['badge-muted','système'] };
+        const trig = trigMap[log.triggeredBy] || ['badge-muted', escHtml(log.triggeredBy || 'système')];
+        const trigBadge = '<span class="badge ' + trig[0] + '" style="font-size:10px;">' + trig[1] + '</span>';
+
+        // Metadata
+        let metaHtml = '';
+        if (log.metadata) {
+          try {
+            const meta = JSON.parse(log.metadata);
+            if (meta.expected !== undefined) {
+              metaHtml += '<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:8px;margin-top:8px;font-size:11px;">';
+              metaHtml += '⚠️ <strong style="color:var(--red);">Anomalie de montant</strong><br>';
+              metaHtml += '<span style="color:var(--muted);">Attendu :</span> <strong>' + formatNumber(meta.expected) + ' FCFA</strong> &nbsp;·&nbsp; ';
+              metaHtml += '<span style="color:var(--muted);">Reçu :</span> <strong style="color:var(--red);">' + formatNumber(meta.received) + ' FCFA</strong><br>';
+              metaHtml += '<span style="color:var(--muted);">Écart :</span> <strong style="color:var(--red);">' + formatNumber(Math.abs(meta.received - meta.expected)) + ' FCFA</strong>';
+              metaHtml += '</div>';
+            } else if (Object.keys(meta).length > 0) {
+              metaHtml += '<div style="font-size:11px;color:var(--muted);margin-top:6px;font-family:monospace;background:var(--dark4);padding:6px 8px;border-radius:6px;">' + escHtml(JSON.stringify(meta, null, 2)) + '</div>';
+            }
+          } catch(e) {}
+        }
+
+        html += '<div style="position:relative;margin-bottom:' + (isLast ? '4' : '16') + 'px;">';
+        html += '<div style="position:absolute;left:-20px;top:4px;width:10px;height:10px;border-radius:50%;background:' + dotColor + ';border:2px solid var(--dark2);"></div>';
+        html += '<div style="background:var(--dark4);border:1px solid ' + (isAnomaly ? 'rgba(239,68,68,0.4)' : 'var(--border)') + ';border-radius:12px;padding:10px 12px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px;">';
+        html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' + fromBadge + '<span style="color:var(--muted);font-size:13px;">→</span>' + toBadge + ' ' + trigBadge + '</div>';
+        html += '<span style="font-size:11px;color:var(--muted);white-space:nowrap;">' + formatDate(log.createdAt) + '</span>';
+        html += '</div>';
+        if (log.reason) html += '<div style="font-size:12px;color:var(--light);">📌 ' + escHtml(log.reason.replace(/_/g, ' ')) + '</div>';
+        html += metaHtml;
+        html += '</div></div>';
+      });
+      html += '</div>';
+    }
+
+    document.getElementById('mp-title').textContent = '📜 Journal d\'audit — ' + (pay ? formatNumber(pay.amount) + ' FCFA · ' + projectTitle : paymentId.substring(0, 8));
     document.getElementById('mp-content').innerHTML = html;
     document.getElementById('modal-project').classList.add('show');
   } catch (err) {

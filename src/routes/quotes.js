@@ -405,12 +405,12 @@ router.post('/:id/pdf', requireAuth, async (req, res, next) => {
 });
 
 // Extrait le public_id Cloudinary depuis une URL secure_url
+// Pour les fichiers raw, Cloudinary requiert l'extension dans le public_id
 function extractPublicId(secureUrl) {
   // ex: https://res.cloudinary.com/cloud/raw/upload/v123/manawa/quotes/devis-xxx-v1.pdf
   const match = secureUrl.match(/\/upload\/(?:v\d+\/)?(.+)$/);
   if (!match) return null;
-  // Retirer l'extension
-  return match[1].replace(/\.[^/.]+$/, '');
+  return match[1]; // conserver l'extension .pdf pour les raw
 }
 
 // GET /api/quotes/:id/pdf — Retourne une URL signée Cloudinary (valable 1h)

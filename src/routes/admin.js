@@ -223,14 +223,63 @@ router.get('/users/:id', async (req, res, next) => {
       where: { id: req.params.id },
       include: {
         professional: true,
-        projects: { orderBy: { createdAt: 'desc' }, take: 10 },
+        projects: {
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          include: {
+            quotes: {
+              orderBy: { createdAt: 'desc' },
+              take: 5,
+              select: {
+                id: true, amount: true, status: true, mode: true,
+                createdAt: true, pdfUrl: true,
+                professional: {
+                  select: {
+                    trade: true,
+                    user: { select: { firstName: true, lastName: true } },
+                  },
+                },
+                payments: { select: { id: true, status: true, amount: true, isDeposit: true } },
+              },
+            },
+          },
+        },
+        reviewsGiven: {
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          select: {
+            id: true, rating: true, comment: true, createdAt: true,
+            professional: {
+              select: {
+                user: { select: { firstName: true, lastName: true } },
+              },
+            },
+          },
+        },
       },
     });
 
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
 
+    // Agrégats rapides
+    const [quoteCount, paymentCount, paymentTotal] = await Promise.all([
+      prisma.quote.count({ where: { project: { clientId: req.params.id } } }),
+      prisma.payment.count({ where: { quote: { project: { clientId: req.params.id } }, status: 'succeeded' } }),
+      prisma.payment.aggregate({
+        where: { quote: { project: { clientId: req.params.id } }, status: 'succeeded' },
+        _sum: { amount: true },
+      }),
+    ]);
+
     const { passwordHash, ...userSafe } = user;
-    res.json(userSafe);
+    res.json({
+      ...userSafe,
+      _stats: {
+        quoteCount,
+        paymentCount,
+        totalSpent: paymentTotal._sum.amount || 0,
+      },
+    });
   } catch (err) {
     next(err);
   }

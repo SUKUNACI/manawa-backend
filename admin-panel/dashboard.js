@@ -946,6 +946,7 @@ async function loadClients(page) {
         + '<td>' + formatDate(u.createdAt) + '</td>'
         + '<td class="td-actions">'
           + actions
+          + '<button class="btn btn-view" onclick="event.stopPropagation();openClientModal(\'' + escAttr(u.id) + '\')" title="Voir profil">👁</button>'
           + '<button class="btn btn-view" onclick="event.stopPropagation();resetClientPassword(\'' + u.id + '\',\'' + escAttr(name) + '\')" title="Reset mot de passe">🔑</button>'
           + '<button class="btn btn-reject" onclick="event.stopPropagation();deleteUser(\'' + u.id + '\',\'' + escAttr(name) + '\')" title="Supprimer">🗑</button>'
         + '</td></tr>';
@@ -971,55 +972,128 @@ async function loadClients(page) {
 async function openClientModal(userId) {
   try {
     const u = await apiCall('/admin/users/' + userId);
-    document.getElementById('mc-title').textContent = (u.firstName || '') + ' ' + (u.lastName || '');
+    const name = ((u.firstName || '') + ' ' + (u.lastName || '')).trim();
+    document.getElementById('mc-title').textContent = name;
 
     const suspended = u.suspended;
-    const statusBadge = suspended
-      ? '<span class="badge badge-red">Suspendu</span>'
-      : '<span class="badge badge-green">Actif</span>';
+    const stats = u._stats || {};
 
-    let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;">';
-    html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:12px;padding:14px;">';
-    html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">CONTACT</div>';
-    html += '<div style="font-weight:600;font-size:14px;">' + escHtml((u.firstName||'') + ' ' + (u.lastName||'')) + '</div>';
-    html += '<div style="font-size:12px;color:var(--muted);margin-top:2px;">' + escHtml(u.email) + '</div>';
-    if (u.phone) html += '<div style="font-size:12px;color:var(--muted);">' + escHtml(u.phone) + '</div>';
-    if (u.city)  html += '<div style="font-size:12px;color:var(--muted);">📍 ' + escHtml(u.city) + '</div>';
+    // ── KPIs ──
+    let html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px;">';
+    html += _kpiMini('Projets', u.projects ? u.projects.length : 0, '📋');
+    html += _kpiMini('Devis reçus', stats.quoteCount || 0, '📄');
+    html += _kpiMini('Dépensé', (stats.totalSpent || 0).toLocaleString('fr-FR') + ' FCFA', '💰');
     html += '</div>';
 
-    html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:12px;padding:14px;">';
-    html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">COMPTE</div>';
-    html += '<div style="margin-bottom:6px;">' + statusBadge + '</div>';
-    html += '<div style="font-size:12px;color:var(--muted);">Inscrit le ' + formatDate(u.createdAt) + '</div>';
-    html += '<div style="font-size:12px;color:var(--muted);">Email ' + (u.emailVerified ? '<span style="color:var(--green);">✓ vérifié</span>' : '<span style="color:var(--red);">✗ non vérifié</span>') + '</div>';
-    html += '</div></div>';
+    // ── ONGLETS ──
+    const tabId = 'client-tab-' + userId.substring(0, 6);
+    html += '<div style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:10px;">';
+    html += '<button id="' + tabId + '-infos" class="tab-btn tab-active" onclick="switchClientTab(\'' + tabId + '\',\'infos\')">Infos</button>';
+    html += '<button id="' + tabId + '-projets" class="tab-btn" onclick="switchClientTab(\'' + tabId + '\',\'projets\')">Projets (' + (u.projects ? u.projects.length : 0) + ')</button>';
+    html += '<button id="' + tabId + '-devis" class="tab-btn" onclick="switchClientTab(\'' + tabId + '\',\'devis\')">Devis (' + (stats.quoteCount || 0) + ')</button>';
+    html += '<button id="' + tabId + '-avis" class="tab-btn" onclick="switchClientTab(\'' + tabId + '\',\'avis\')">Avis (' + (u.reviewsGiven ? u.reviewsGiven.length : 0) + ')</button>';
+    html += '</div>';
 
-    // Projets récents
+    // ── TAB INFOS ──
+    html += '<div id="' + tabId + '-tab-infos" class="client-tab-panel">';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">';
+    html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:12px;padding:14px;">';
+    html += '<div style="font-size:11px;color:var(--muted);margin-bottom:8px;font-weight:600;">CONTACT</div>';
+    html += '<div style="font-weight:700;font-size:14px;margin-bottom:4px;">' + escHtml(name) + '</div>';
+    html += '<div style="font-size:12px;color:var(--muted);">✉ ' + escHtml(u.email) + '</div>';
+    if (u.phone) html += '<div style="font-size:12px;color:var(--muted);margin-top:3px;">📞 ' + escHtml(u.phone) + '</div>';
+    if (u.city)  html += '<div style="font-size:12px;color:var(--muted);margin-top:3px;">📍 ' + escHtml(u.city) + '</div>';
+    html += '</div>';
+    html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:12px;padding:14px;">';
+    html += '<div style="font-size:11px;color:var(--muted);margin-bottom:8px;font-weight:600;">COMPTE</div>';
+    html += '<div style="margin-bottom:6px;">' + (suspended ? '<span class="badge badge-red">Suspendu</span>' : '<span class="badge badge-green">Actif</span>') + '</div>';
+    html += '<div style="font-size:12px;color:var(--muted);">Inscrit le ' + formatDate(u.createdAt) + '</div>';
+    html += '<div style="font-size:12px;margin-top:3px;">Email : ' + (u.emailVerified ? '<span style="color:var(--green);">✓ vérifié</span>' : '<span style="color:var(--red);">✗ non vérifié</span>') + '</div>';
+    html += '<div style="font-size:12px;margin-top:3px;">Tél : ' + (u.phoneVerified ? '<span style="color:var(--green);">✓ vérifié</span>' : '<span style="color:var(--muted);">non vérifié</span>') + '</div>';
+    html += '</div></div>';
+    html += '</div>';
+
+    // ── TAB PROJETS ──
+    html += '<div id="' + tabId + '-tab-projets" class="client-tab-panel" style="display:none;">';
+    const projStatusColors = { OPEN:'var(--green)', IN_PROGRESS:'var(--blue)', COMPLETED:'var(--muted)', CANCELLED:'var(--red)' };
+    const projStatusLabels = { OPEN:'Ouvert', IN_PROGRESS:'En cours', COMPLETED:'Terminé', CANCELLED:'Annulé' };
     if (u.projects && u.projects.length > 0) {
-      html += '<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px;">Projets récents (' + u.projects.length + ')</div>';
-      html += '<div style="display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto;">';
+      html += '<div style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;">';
       u.projects.forEach(p => {
-        const statusColors = { OPEN:'var(--green)', IN_PROGRESS:'var(--blue)', COMPLETED:'var(--muted)', CANCELLED:'var(--red)' };
-        const statusLabels = { OPEN:'Ouvert', IN_PROGRESS:'En cours', COMPLETED:'Terminé', CANCELLED:'Annulé' };
-        html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:10px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;">';
-        html += '<div><div style="font-size:13px;font-weight:500;">' + escHtml(p.title || 'Sans titre') + '</div>';
-        html += '<div style="font-size:11px;color:var(--muted);">' + formatDate(p.createdAt) + '</div></div>';
-        html += '<span style="font-size:11px;font-weight:600;color:' + (statusColors[p.status]||'var(--muted)') + ';">' + (statusLabels[p.status]||p.status) + '</span>';
+        const quoteCount = p.quotes ? p.quotes.length : 0;
+        html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">';
+        html += '<div style="font-size:13px;font-weight:600;">' + escHtml(p.title || 'Sans titre') + '</div>';
+        html += '<span style="font-size:11px;font-weight:600;color:' + (projStatusColors[p.status] || 'var(--muted)') + ';">' + (projStatusLabels[p.status] || p.status) + '</span>';
+        html += '</div>';
+        html += '<div style="font-size:11px;color:var(--muted);">' + formatDate(p.createdAt) + (quoteCount ? ' · ' + quoteCount + ' devis' : '') + '</div>';
         html += '</div>';
       });
       html += '</div>';
     } else {
-      html += '<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px;">Aucun projet publié</div>';
+      html += '<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px;">Aucun projet publié</div>';
     }
+    html += '</div>';
 
-    // Actions
-    html += '<div style="display:flex;gap:10px;margin-top:20px;">';
-    if (suspended) {
-      html += '<button class="btn btn-approve" style="flex:1;" onclick="reactivateUser(\'' + escAttr(u.id) + '\',\'' + escAttr((u.firstName||'') + ' ' + (u.lastName||'')) + '\');closeModal(\'modal-client\')">↺ Réactiver</button>';
+    // ── TAB DEVIS ──
+    html += '<div id="' + tabId + '-tab-devis" class="client-tab-panel" style="display:none;">';
+    const allQuotes = (u.projects || []).flatMap(p => (p.quotes || []).map(q => ({ ...q, projectTitle: p.title })));
+    const quoteStatusColors = { PENDING:'var(--orange)', ACCEPTED:'var(--green)', REFUSED:'var(--red)', EXPIRED:'var(--muted)', REVISED:'var(--blue)' };
+    const quoteStatusLabels = { PENDING:'En attente', ACCEPTED:'Accepté', REFUSED:'Refusé', EXPIRED:'Expiré', REVISED:'Révisé' };
+    if (allQuotes.length > 0) {
+      html += '<div style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;">';
+      allQuotes.forEach(q => {
+        const proName = q.professional ? ((q.professional.user.firstName || '') + ' ' + (q.professional.user.lastName || '')).trim() : '-';
+        html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">';
+        html += '<div style="font-size:13px;font-weight:600;">' + escHtml(q.projectTitle || '-') + '</div>';
+        html += '<span style="font-size:11px;font-weight:600;color:' + (quoteStatusColors[q.status] || 'var(--muted)') + ';">' + (quoteStatusLabels[q.status] || q.status) + '</span>';
+        html += '</div>';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+        html += '<div style="font-size:12px;color:var(--muted);">Par ' + escHtml(proName) + ' · ' + formatDate(q.createdAt) + '</div>';
+        html += '<div style="font-size:13px;font-weight:700;color:var(--orange);">' + (q.amount || 0).toLocaleString('fr-FR') + ' FCFA</div>';
+        html += '</div>';
+        if (q.pdfUrl) {
+          html += '<div style="margin-top:6px;"><a href="' + escAttr(q.pdfUrl) + '" target="_blank" class="btn btn-view" style="font-size:11px;padding:3px 10px;">📄 Voir PDF</a></div>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
     } else {
-      html += '<button class="btn btn-reject" style="flex:1;" onclick="suspendUser(\'' + escAttr(u.id) + '\',\'' + escAttr((u.firstName||'') + ' ' + (u.lastName||'')) + '\');closeModal(\'modal-client\')">⏸ Suspendre</button>';
+      html += '<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px;">Aucun devis reçu</div>';
     }
-    html += '<button class="btn btn-view" style="flex:1;" onclick="resetClientPassword(\'' + escAttr(u.id) + '\',\'' + escAttr((u.firstName||'') + ' ' + (u.lastName||'')) + '\')">🔑 Reset mot de passe</button>';
+    html += '</div>';
+
+    // ── TAB AVIS ──
+    html += '<div id="' + tabId + '-tab-avis" class="client-tab-panel" style="display:none;">';
+    if (u.reviewsGiven && u.reviewsGiven.length > 0) {
+      html += '<div style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;">';
+      u.reviewsGiven.forEach(r => {
+        const proName = r.professional ? ((r.professional.user.firstName || '') + ' ' + (r.professional.user.lastName || '')).trim() : '-';
+        const stars = '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating);
+        html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">';
+        html += '<div style="font-size:13px;font-weight:600;">' + escHtml(proName) + '</div>';
+        html += '<span style="color:var(--orange);font-size:13px;">' + stars + '</span>';
+        html += '</div>';
+        if (r.comment) html += '<div style="font-size:12px;color:var(--muted);font-style:italic;">"' + escHtml(r.comment) + '"</div>';
+        html += '<div style="font-size:11px;color:var(--muted);margin-top:4px;">' + formatDate(r.createdAt) + '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px;">Aucun avis laissé</div>';
+    }
+    html += '</div>';
+
+    // ── ACTIONS ──
+    html += '<div style="display:flex;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--border);">';
+    if (suspended) {
+      html += '<button class="btn btn-approve" style="flex:1;" onclick="reactivateUser(\'' + escAttr(u.id) + '\',\'' + escAttr(name) + '\');closeModal(\'modal-client\')">↺ Réactiver</button>';
+    } else {
+      html += '<button class="btn btn-reject" style="flex:1;" onclick="suspendUser(\'' + escAttr(u.id) + '\',\'' + escAttr(name) + '\');closeModal(\'modal-client\')">⏸ Suspendre</button>';
+    }
+    html += '<button class="btn btn-view" style="flex:1;" onclick="resetClientPassword(\'' + escAttr(u.id) + '\',\'' + escAttr(name) + '\')">🔑 Reset mdp</button>';
     html += '</div>';
 
     document.getElementById('mc-body').innerHTML = html;
@@ -1027,6 +1101,23 @@ async function openClientModal(userId) {
   } catch (err) {
     showToast('Erreur: ' + err.message, true);
   }
+}
+
+function _kpiMini(label, value, icon) {
+  return '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:10px;padding:10px 12px;text-align:center;">'
+    + '<div style="font-size:18px;margin-bottom:2px;">' + icon + '</div>'
+    + '<div style="font-size:15px;font-weight:700;color:var(--white);">' + value + '</div>'
+    + '<div style="font-size:10px;color:var(--muted);margin-top:2px;">' + label + '</div>'
+    + '</div>';
+}
+
+function switchClientTab(tabId, tab) {
+  ['infos','projets','devis','avis'].forEach(t => {
+    const panel = document.getElementById(tabId + '-tab-' + t);
+    const btn = document.getElementById(tabId + '-' + t);
+    if (panel) panel.style.display = t === tab ? 'block' : 'none';
+    if (btn) { btn.classList.toggle('tab-active', t === tab); }
+  });
 }
 
 async function suspendUser(userId, name) {

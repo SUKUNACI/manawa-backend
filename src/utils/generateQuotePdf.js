@@ -55,6 +55,7 @@ function generateQuotePdf(quote, professional, project) {
     });
 
     buildPdfContent(doc, quote, professional, project);
+    doc.end();
   });
 }
 

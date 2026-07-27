@@ -1053,9 +1053,7 @@ async function openClientModal(userId) {
         html += '<div style="font-size:12px;color:var(--muted);">Par ' + escHtml(proName) + ' · ' + formatDate(q.createdAt) + '</div>';
         html += '<div style="font-size:13px;font-weight:700;color:var(--orange);">' + (q.amount || 0).toLocaleString('fr-FR') + ' FCFA</div>';
         html += '</div>';
-        if (q.pdfUrl) {
-          html += '<div style="margin-top:6px;"><a href="' + escAttr(q.pdfUrl) + '" target="_blank" class="btn btn-view" style="font-size:11px;padding:3px 10px;">📄 Voir PDF</a></div>';
-        }
+        html += '<div style="margin-top:6px;"><a href="' + API_BASE + '/quotes/' + escAttr(q.id) + '/pdf?stream=1" target="_blank" class="btn btn-view" style="font-size:11px;padding:3px 10px;">📄 Voir PDF</a></div>';
         html += '</div>';
       });
       html += '</div>';
@@ -1285,7 +1283,7 @@ async function viewProject(id) {
           : q.status === 'REFUSED' ? '<span class="badge badge-red">Refusé</span>'
           : '<span class="badge badge-yellow">En attente</span>';
         html += '<div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">';
-        html += '<div><strong style="color:var(--white);">' + proName + '</strong><p style="font-size:12px;color:var(--muted);margin-top:2px;">' + escHtml(q.description || '').substring(0, 80) + '</p></div>';
+        html += '<div><strong style="color:var(--white);">' + proName + '</strong><p style="font-size:12px;color:var(--muted);margin-top:2px;">' + escHtml(q.description || '').substring(0, 80) + '</p><a href="' + API_BASE + '/quotes/' + escAttr(q.id) + '/pdf?stream=1" target="_blank" class="btn btn-view" style="font-size:11px;padding:3px 10px;margin-top:6px;display:inline-block;">📄 Voir PDF</a></div>';
         html += '<div style="text-align:right;"><span style="color:var(--orange);font-weight:700;font-size:15px;">' + formatNumber(q.amount) + ' FCFA</span><br>' + qStatus + '</div>';
         html += '</div>';
       });
@@ -3974,10 +3972,10 @@ async function openQuoteDetail(quoteId) {
     if (['PENDING', 'REVISED'].includes(q.status)) {
       document.getElementById('qd-cancel-btn').style.display = '';
     }
-    // Bouton PDF
-    if (q.pdfUrl) {
+    // Bouton PDF — toujours affiché, pointe vers le stream backend
+    {
       const pdfBtn = document.getElementById('qd-pdf-btn');
-      pdfBtn.href = q.pdfUrl;
+      pdfBtn.href = API_BASE + '/quotes/' + q.id + '/pdf?stream=1';
       pdfBtn.style.display = '';
     }
 

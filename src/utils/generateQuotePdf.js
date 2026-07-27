@@ -1,6 +1,5 @@
 const PDFDocument = require('pdfkit');
-const fs = require('fs');
-const path = require('path');
+const { uploadBuffer } = require('../config/cloudinary');
 
 const ORANGE = '#F4720B';
 const DARK = '#1A1A2E';
@@ -17,18 +16,25 @@ function formatDate(date) {
 
 function generateQuotePdf(quote, professional, project) {
   return new Promise((resolve, reject) => {
-    const uploadsDir = path.join(__dirname, '../../uploads/quotes');
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-
-    const fileName = `devis-${quote.id.substring(0, 8)}-v${quote.version}.pdf`;
-    const filePath = path.join(uploadsDir, fileName);
-    const publicUrl = `/uploads/quotes/${fileName}`;
-
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
-    const stream = fs.createWriteStream(filePath);
-    doc.pipe(stream);
+    const chunks = [];
+
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('error', reject);
+    doc.on('end', async () => {
+      try {
+        const buffer = Buffer.concat(chunks);
+        const fileName = `devis-${quote.id.substring(0, 8)}-v${quote.version}`;
+        const url = await uploadBuffer(buffer, 'manawa/quotes', {
+          resource_type: 'raw',
+          public_id: fileName,
+          format: 'pdf',
+        });
+        resolve(url);
+      } catch (err) {
+        reject(err);
+      }
+    });
 
     const pageWidth = doc.page.width - 100;
 
@@ -43,16 +49,14 @@ function generateQuotePdf(quote, professional, project) {
       .text(`Version ${quote.version}`, 50, 82)
       .text(`Date : ${formatDate(quote.createdAt)}`, 50, 96);
 
-    // Validité
     if (quote.expiresAt) {
       doc.fontSize(9).fillColor(DARK)
         .text(`Valable jusqu'au : ${formatDate(quote.expiresAt)}`, 300, 96, { align: 'right', width: pageWidth - 250 });
     }
 
-    // === PROFESSIONNEL (émetteur) ===
+    // === PROFESSIONNEL ===
     let y = 140;
-    doc.fontSize(10).fillColor(ORANGE).font('Helvetica-Bold')
-      .text('ÉMETTEUR', 50, y);
+    doc.fontSize(10).fillColor(ORANGE).font('Helvetica-Bold').text('ÉMETTEUR', 50, y);
     y += 16;
 
     const proUser = professional.user || {};
@@ -65,10 +69,9 @@ function generateQuotePdf(quote, professional, project) {
     if (proUser.phone) { doc.text(proUser.phone, 50, y); y += 12; }
     if (proUser.city) { doc.text(proUser.city, 50, y); y += 12; }
 
-    // === CLIENT (destinataire) ===
+    // === CLIENT ===
     let yClient = 140;
-    doc.fontSize(10).fillColor(ORANGE).font('Helvetica-Bold')
-      .text('CLIENT', 350, yClient);
+    doc.fontSize(10).fillColor(ORANGE).font('Helvetica-Bold').text('CLIENT', 350, yClient);
     yClient += 16;
 
     const client = project.client || {};
@@ -85,25 +88,21 @@ function generateQuotePdf(quote, professional, project) {
     doc.moveTo(50, y).lineTo(50 + pageWidth, y).strokeColor(BORDER).stroke();
     y += 15;
 
-    doc.fontSize(10).fillColor(ORANGE).font('Helvetica-Bold')
-      .text('PROJET', 50, y);
+    doc.fontSize(10).fillColor(ORANGE).font('Helvetica-Bold').text('PROJET', 50, y);
     y += 16;
-    doc.fontSize(10).fillColor(DARK).font('Helvetica-Bold')
-      .text(project.title, 50, y);
+    doc.fontSize(10).fillColor(DARK).font('Helvetica-Bold').text(project.title, 50, y);
     y += 14;
     doc.fontSize(9).fillColor(MUTED).font('Helvetica')
       .text(`${project.tradeNeeded || ''} · ${project.city || ''}`, 50, y);
     y += 20;
 
-    // === CONTENU DU DEVIS ===
+    // === CONTENU ===
     doc.moveTo(50, y).lineTo(50 + pageWidth, y).strokeColor(BORDER).stroke();
     y += 15;
 
     if (quote.mode === 'DETAILED' && quote.items && quote.items.length > 0) {
-      // Mode détaillé — tableau des lignes
       const colWidths = { label: 200, qty: 50, unit: 50, unitPrice: 90, total: 100 };
 
-      // Header du tableau
       doc.rect(50, y, pageWidth, 22).fill('#F3F4F6');
       doc.fontSize(8).fillColor(MUTED).font('Helvetica-Bold');
       doc.text('DÉSIGNATION', 55, y + 7, { width: colWidths.label });
@@ -113,7 +112,6 @@ function generateQuotePdf(quote, professional, project) {
       doc.text('TOTAL', 55 + colWidths.label + colWidths.qty + colWidths.unit + colWidths.unitPrice, y + 7, { width: colWidths.total, align: 'right' });
       y += 26;
 
-      // Grouper par catégorie
       const categories = {
         LABOUR: { label: "Main d'œuvre", items: [] },
         MATERIALS: { label: 'Matériaux', items: [] },
@@ -125,16 +123,14 @@ function generateQuotePdf(quote, professional, project) {
         cat.items.push(item);
       });
 
-      Object.entries(categories).forEach(([key, cat]) => {
+      Object.entries(categories).forEach(([, cat]) => {
         if (cat.items.length === 0) return;
 
-        // Sous-titre catégorie
         doc.rect(50, y, pageWidth, 18).fill('#FAFAFA');
         doc.fontSize(8).fillColor(ORANGE).font('Helvetica-Bold')
           .text(cat.label.toUpperCase(), 55, y + 5);
         y += 22;
 
-        // Lignes
         cat.items.forEach(item => {
           if (y > 720) { doc.addPage(); y = 50; }
 
@@ -150,7 +146,6 @@ function generateQuotePdf(quote, professional, project) {
           doc.moveTo(50, y - 2).lineTo(50 + pageWidth, y - 2).strokeColor('#F3F4F6').lineWidth(0.5).stroke();
         });
 
-        // Sous-total catégorie
         const catTotal = cat.items.reduce((s, i) => s + (i.total || i.quantity * i.unitPrice), 0);
         doc.fontSize(8).fillColor(MUTED).font('Helvetica')
           .text(`Sous-total ${cat.label}`, 55, y + 2, { width: colWidths.label + colWidths.qty + colWidths.unit + colWidths.unitPrice });
@@ -159,7 +154,6 @@ function generateQuotePdf(quote, professional, project) {
         y += 22;
       });
 
-      // Total général
       y += 5;
       doc.rect(50, y, pageWidth, 30).fill(ORANGE);
       doc.fontSize(12).fillColor('#FFFFFF').font('Helvetica-Bold')
@@ -168,9 +162,7 @@ function generateQuotePdf(quote, professional, project) {
       y += 40;
 
     } else {
-      // Mode simple
-      doc.fontSize(10).fillColor(DARK).font('Helvetica-Bold')
-        .text('Montant proposé', 50, y);
+      doc.fontSize(10).fillColor(DARK).font('Helvetica-Bold').text('Montant proposé', 50, y);
       y += 20;
 
       doc.rect(50, y, pageWidth, 36).fill(ORANGE);
@@ -183,8 +175,7 @@ function generateQuotePdf(quote, professional, project) {
     if (quote.description) {
       if (y > 680) { doc.addPage(); y = 50; }
       y += 10;
-      doc.fontSize(10).fillColor(ORANGE).font('Helvetica-Bold')
-        .text('DESCRIPTION & CONDITIONS', 50, y);
+      doc.fontSize(10).fillColor(ORANGE).font('Helvetica-Bold').text('DESCRIPTION & CONDITIONS', 50, y);
       y += 16;
       doc.fontSize(9).fillColor(DARK).font('Helvetica')
         .text(quote.description, 50, y, { width: pageWidth, lineGap: 4 });
@@ -192,7 +183,6 @@ function generateQuotePdf(quote, professional, project) {
     }
 
     // === PIED DE PAGE ===
-    if (y > 700) { doc.addPage(); y = 50; }
     const footerY = doc.page.height - 80;
     doc.moveTo(50, footerY).lineTo(50 + pageWidth, footerY).strokeColor(BORDER).lineWidth(0.5).stroke();
 
@@ -201,9 +191,6 @@ function generateQuotePdf(quote, professional, project) {
       .text('Ce document ne constitue pas une facture. Les prix sont exprimés en FCFA.', 50, footerY + 22, { width: pageWidth, align: 'center' });
 
     doc.end();
-
-    stream.on('finish', () => resolve(publicUrl));
-    stream.on('error', reject);
   });
 }
 

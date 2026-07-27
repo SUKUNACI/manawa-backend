@@ -14,6 +14,20 @@ function formatDate(date) {
   return new Date(date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+// Génère le buffer PDF en mémoire sans uploader
+function generateQuotePdfBuffer(quote, professional, project) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const chunks = [];
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('error', reject);
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    buildPdfContent(doc, quote, professional, project);
+    doc.end();
+  });
+}
+
+// Génère le PDF et l'uploade sur Cloudinary, retourne l'URL
 function generateQuotePdf(quote, professional, project) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
@@ -40,6 +54,11 @@ function generateQuotePdf(quote, professional, project) {
       }
     });
 
+    buildPdfContent(doc, quote, professional, project);
+  });
+}
+
+function buildPdfContent(doc, quote, professional, project) {
     const pageWidth = doc.page.width - 100;
 
     // === EN-TÊTE ===
@@ -193,9 +212,7 @@ function generateQuotePdf(quote, professional, project) {
     doc.fontSize(8).fillColor(MUTED).font('Helvetica')
       .text(`Devis généré via MANAWA · Validité : ${quote.validityDays || 15} jours à compter de la date d'émission`, 50, footerY + 10, { width: pageWidth, align: 'center' })
       .text('Ce document ne constitue pas une facture. Les prix sont exprimés en FCFA.', 50, footerY + 22, { width: pageWidth, align: 'center' });
-
-    doc.end();
-  });
 }
 
 module.exports = generateQuotePdf;
+module.exports.generateQuotePdfBuffer = generateQuotePdfBuffer;

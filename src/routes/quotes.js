@@ -4,6 +4,7 @@ const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { sendPushNotification } = require('../config/pushNotifications');
 const generateQuotePdf = require('../utils/generateQuotePdf');
+const { generateQuotePdfBuffer } = require('../utils/generateQuotePdf');
 const { getActiveTier, getTierConfig } = require('./subscriptions');
 
 const router = express.Router();
@@ -422,24 +423,14 @@ router.get('/:id/pdf', requireAuth, async (req, res, next) => {
       await prisma.quote.update({ where: { id: quote.id }, data: { pdfUrl } });
     }
 
-    // Si mode stream demandé (?stream=1), télécharger et transmettre le PDF directement
+    // Si mode stream demandé (?stream=1), générer le PDF en mémoire et l'envoyer directement
     if (req.query.stream === '1') {
-      const fetchUrl = (url) => new Promise((resolve, reject) => {
-        const mod = url.startsWith('https') ? require('https') : require('http');
-        mod.get(url, (resp) => {
-          if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
-            return resolve(fetchUrl(resp.headers.location));
-          }
-          resolve(resp);
-        }).on('error', reject);
-      });
-
-      const upstream = await fetchUrl(pdfUrl);
+      const buffer = await generateQuotePdfBuffer(quote, quote.professional, quote.project);
       const fileName = `devis-${quote.id.substring(0, 8)}-v${quote.version}.pdf`;
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-      upstream.pipe(res);
-      return;
+      res.setHeader('Content-Length', buffer.length);
+      return res.end(buffer);
     }
 
     res.json({ pdfUrl });

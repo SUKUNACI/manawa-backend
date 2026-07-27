@@ -244,7 +244,7 @@ router.get('/users/:id', async (req, res, next) => {
             },
           },
         },
-        reviewsGiven: {
+        reviewsWritten: {
           orderBy: { createdAt: 'desc' },
           take: 5,
           select: {

@@ -991,7 +991,7 @@ async function openClientModal(userId) {
     html += '<button id="' + tabId + '-infos" class="tab-btn tab-active" onclick="switchClientTab(\'' + tabId + '\',\'infos\')">Infos</button>';
     html += '<button id="' + tabId + '-projets" class="tab-btn" onclick="switchClientTab(\'' + tabId + '\',\'projets\')">Projets (' + (u.projects ? u.projects.length : 0) + ')</button>';
     html += '<button id="' + tabId + '-devis" class="tab-btn" onclick="switchClientTab(\'' + tabId + '\',\'devis\')">Devis (' + (stats.quoteCount || 0) + ')</button>';
-    html += '<button id="' + tabId + '-avis" class="tab-btn" onclick="switchClientTab(\'' + tabId + '\',\'avis\')">Avis (' + (u.reviewsGiven ? u.reviewsGiven.length : 0) + ')</button>';
+    html += '<button id="' + tabId + '-avis" class="tab-btn" onclick="switchClientTab(\'' + tabId + '\',\'avis\')">Avis (' + (u.reviewsWritten ? u.reviewsWritten.length : 0) + ')</button>';
     html += '</div>';
 
     // ── TAB INFOS ──
@@ -1066,9 +1066,9 @@ async function openClientModal(userId) {
 
     // ── TAB AVIS ──
     html += '<div id="' + tabId + '-tab-avis" class="client-tab-panel" style="display:none;">';
-    if (u.reviewsGiven && u.reviewsGiven.length > 0) {
+    if (u.reviewsWritten && u.reviewsWritten.length > 0) {
       html += '<div style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;">';
-      u.reviewsGiven.forEach(r => {
+      u.reviewsWritten.forEach(r => {
         const proName = r.professional ? ((r.professional.user.firstName || '') + ' ' + (r.professional.user.lastName || '')).trim() : '-';
         const stars = '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating);
         html += '<div style="background:var(--dark4);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">';

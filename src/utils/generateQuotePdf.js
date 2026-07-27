@@ -27,8 +27,12 @@ function generateQuotePdf(quote, professional, project) {
         const fileName = `devis-${quote.id.substring(0, 8)}-v${quote.version}`;
         const url = await uploadBuffer(buffer, 'manawa/quotes', {
           resource_type: 'raw',
+          type: 'upload',
+          access_mode: 'public',
           public_id: fileName,
           format: 'pdf',
+          overwrite: true,
+          invalidate: true,
         });
         resolve(url);
       } catch (err) {

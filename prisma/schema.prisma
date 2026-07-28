@@ -8,52 +8,52 @@ datasource db {
 }
 
 model User {
-  id                  String          @id @default(uuid())
-  email               String          @unique
-  passwordHash        String
-  firstName           String
-  lastName            String
-  phone               String?
-  role                UserRole
-  avatarUrl           String?
-  city                String?
-  latitude            Float?
-  longitude           Float?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-  emailVerified       Boolean         @default(false)
-  emailVerifyCode     String?
-  emailVerifyExpiry   DateTime?
-  passwordResetCode   String?
-  passwordResetExpiry DateTime?
-  phoneOtpCode        String?
-  phoneOtpExpiry      DateTime?
-  phoneVerified       Boolean         @default(false)
-  suspended           Boolean         @default(false)
-  adminLevel          String?
-  adminPermissions    String?         // JSON : tableau de sections autorisées, null = accès total
-  adminTeamId         String?
-  lastLoginAt         DateTime?
-  securityQuestion    String?
-  securityAnswerHash  String?
-  expoPushToken       String?
-  deletedAt           DateTime?
-  follows             Follow[]
-  receivedMessages    Message[]       @relation("ReceivedMessages")
-  sentMessages        Message[]       @relation("SentMessages")
-  portfolioLikes      PortfolioLike[]
+  id                    String                 @id @default(uuid())
+  email                 String                 @unique
+  passwordHash          String
+  firstName             String
+  lastName              String
+  phone                 String?
+  role                  UserRole
+  avatarUrl             String?
+  city                  String?
+  latitude              Float?
+  longitude             Float?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  emailVerified         Boolean                @default(false)
+  emailVerifyCode       String?
+  emailVerifyExpiry     DateTime?
+  passwordResetCode     String?
+  passwordResetExpiry   DateTime?
+  phoneOtpCode          String?
+  phoneOtpExpiry        DateTime?
+  phoneVerified         Boolean                @default(false)
+  suspended             Boolean                @default(false)
+  adminLevel            String?
+  adminPermissions      String? // JSON : tableau de sections autorisées, null = accès total
+  adminTeamId           String?
+  lastLoginAt           DateTime?
+  securityQuestion      String?
+  securityAnswerHash    String?
+  expoPushToken         String?
+  deletedAt             DateTime?
+  follows               Follow[]
+  receivedMessages      Message[]              @relation("ReceivedMessages")
+  sentMessages          Message[]              @relation("SentMessages")
+  portfolioLikes        PortfolioLike[]
   portfolioProjectLikes PortfolioProjectLike[]
-  portfolioComments   PortfolioComment[]
-  professional        Professional?
-  profileViews        ProfileView[]
-  projects            Project[]       @relation("ClientProjects")
-  reviewsWritten      Review[]        @relation("ReviewAuthor")
-  contentReports      ContentReport[]
-  supportTickets      SupportTicket[]
-  pushTokens          PushToken[]
-  notifications       Notification[]
-  disputes            Dispute[]
-  refreshTokens       RefreshToken[]
+  portfolioComments     PortfolioComment[]
+  professional          Professional?
+  profileViews          ProfileView[]
+  projects              Project[]              @relation("ClientProjects")
+  reviewsWritten        Review[]               @relation("ReviewAuthor")
+  contentReports        ContentReport[]
+  supportTickets        SupportTicket[]
+  pushTokens            PushToken[]
+  notifications         Notification[]
+  disputes              Dispute[]
+  refreshTokens         RefreshToken[]
 }
 
 model RefreshToken {
@@ -68,48 +68,48 @@ model RefreshToken {
 }
 
 model Professional {
-  id                      String          @id @default(uuid())
-  userId                  String          @unique
+  id                      String             @id @default(uuid())
+  userId                  String             @unique
   trade                   String
   companyName             String?
   siret                   String?
   description             String?
   yearsExperience         Int?
   hourlyRate              Float?
-  decennaleVerified       Boolean         @default(false)
+  decennaleVerified       Boolean            @default(false)
   decennaleDocUrl         String?
-  rgeLabel                Boolean         @default(false)
+  rgeLabel                Boolean            @default(false)
   qualibatNumber          String?
-  verifiedByAdmin         Boolean         @default(false)
-  interventionRadiusKm    Int             @default(30)
-  averageRating           Float           @default(0)
-  reviewCount             Int             @default(0)
-  createdAt               DateTime        @default(now())
-  updatedAt               DateTime        @updatedAt
+  verifiedByAdmin         Boolean            @default(false)
+  interventionRadiusKm    Int                @default(30)
+  averageRating           Float              @default(0)
+  reviewCount             Int                @default(0)
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
   idDocumentUrl           String?
-  identityStatus          String          @default("NOT_SUBMITTED")
+  identityStatus          String             @default("NOT_SUBMITTED")
   selfieUrl               String?
-  accountType             AccountType     @default(INDEPENDENT)
-  cancelledMissionsCount  Int             @default(0)
-  completedMissionsCount  Int             @default(0)
-  complaintsCount         Int             @default(0)
+  accountType             AccountType        @default(INDEPENDENT)
+  cancelledMissionsCount  Int                @default(0)
+  completedMissionsCount  Int                @default(0)
+  complaintsCount         Int                @default(0)
   employeeCount           Int?
   lastExperienceUpdate    DateTime?
   idDocumentVersoUrl      String?
-  trades                  String[]        @default([])
+  trades                  String[]           @default([])
   identityRejectionReason String?
   trialEndsAt             DateTime?
-  companyCode             String?         @unique
-  companyMembers          CompanyMember[] @relation("CompanyMembers")
-  memberOf                CompanyMember?  @relation("MemberOf")
+  companyCode             String?            @unique
+  companyMembers          CompanyMember[]    @relation("CompanyMembers")
+  memberOf                CompanyMember?     @relation("MemberOf")
   promoUsages             PromoUsage[]
   followers               Follow[]
   portfolio               PortfolioItem[]
   portfolioProjects       PortfolioProject[] @relation("PortfolioProjects")
-  user                    User            @relation(fields: [userId], references: [id])
+  user                    User               @relation(fields: [userId], references: [id])
   profileViews            ProfileView[]
   quotes                  Quote[]
-  reviews                 Review[]        @relation("ReviewedProfessional")
+  reviews                 Review[]           @relation("ReviewedProfessional")
   subscription            Subscription?
 }
 
@@ -124,7 +124,7 @@ model PortfolioItem {
 }
 
 model PortfolioProject {
-  id             String                 @id @default(uuid())
+  id             String                  @id @default(uuid())
   professionalId String
   title          String
   description    String
@@ -132,9 +132,9 @@ model PortfolioProject {
   images         PortfolioProjectImage[]
   comments       PortfolioComment[]
   likes          PortfolioProjectLike[]
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
-  professional   Professional           @relation("PortfolioProjects", fields: [professionalId], references: [id])
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  professional   Professional            @relation("PortfolioProjects", fields: [professionalId], references: [id])
 
   @@index([professionalId, createdAt])
 }
@@ -290,31 +290,31 @@ model Subscription {
 }
 
 model Payment {
-  id              String             @id @default(uuid())
-  quoteId         String
-  geniuspayRef    String?
-  idempotencyKey  String?            @unique
-  amount          Float
-  status          String             // pending | succeeded | failed
-  isDeposit       Boolean            @default(true)
-  fees            Float              @default(0)
-  netAmount       Float?
-  paymentMethod   String?
-  metadata        String?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  completedAt     DateTime?
-  commissionPaid  Boolean            @default(false)
-  bankRef         String?
-  reconciledAt    DateTime?
-  reconciledBy    String?
-  refundAmount    Float?
-  refundedAt      DateTime?
-  refundRef       String?
-  refundNote      String?
-  quote           Quote              @relation(fields: [quoteId], references: [id])
-  auditLogs       PaymentAuditLog[]
-  disputes        Dispute[]
+  id             String            @id @default(uuid())
+  quoteId        String
+  geniuspayRef   String?
+  idempotencyKey String?           @unique
+  amount         Float
+  status         String // pending | succeeded | failed
+  isDeposit      Boolean           @default(true)
+  fees           Float             @default(0)
+  netAmount      Float?
+  paymentMethod  String?
+  metadata       String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  completedAt    DateTime?
+  commissionPaid Boolean           @default(false)
+  bankRef        String?
+  reconciledAt   DateTime?
+  reconciledBy   String?
+  refundAmount   Float?
+  refundedAt     DateTime?
+  refundRef      String?
+  refundNote     String?
+  quote          Quote             @relation(fields: [quoteId], references: [id])
+  auditLogs      PaymentAuditLog[]
+  disputes       Dispute[]
 
   @@unique([quoteId, isDeposit])
 }
@@ -322,12 +322,12 @@ model Payment {
 model PaymentAuditLog {
   id          String   @id @default(uuid())
   paymentId   String
-  fromStatus  String   // statut avant le changement
-  toStatus    String   // statut après le changement
-  reason      String?  // webhook | recheck | cron | manual | amount_mismatch
-  triggeredBy String?  // userId si action manuelle, "system" sinon
+  fromStatus  String // statut avant le changement
+  toStatus    String // statut après le changement
+  reason      String? // webhook | recheck | cron | manual | amount_mismatch
+  triggeredBy String? // userId si action manuelle, "system" sinon
   ipAddress   String?
-  metadata    String?  // JSON — données brutes GeniusPay ou info supplémentaire
+  metadata    String? // JSON — données brutes GeniusPay ou info supplémentaire
   createdAt   DateTime @default(now())
   payment     Payment  @relation(fields: [paymentId], references: [id])
 
@@ -360,19 +360,19 @@ model Review {
 }
 
 model SupportTicket {
-  id               String           @id @default(uuid())
-  userId           String
-  category         String
-  subject          String
-  status           String           @default("OPEN")
-  priority         String           @default("NORMAL") // LOW | NORMAL | HIGH | URGENT
-  assignedTo       String?
-  firstResponseAt  DateTime?
-  resolvedAt       DateTime?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  messages         SupportMessage[]
-  user             User             @relation(fields: [userId], references: [id])
+  id              String           @id @default(uuid())
+  userId          String
+  category        String
+  subject         String
+  status          String           @default("OPEN")
+  priority        String           @default("NORMAL") // LOW | NORMAL | HIGH | URGENT
+  assignedTo      String?
+  firstResponseAt DateTime?
+  resolvedAt      DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  messages        SupportMessage[]
+  user            User             @relation(fields: [userId], references: [id])
 }
 
 model SupportMessage {
@@ -402,8 +402,8 @@ model AdminTeam {
   name        String   @unique
   description String?
   color       String?
-  permissions String?  // JSON : tableau de sections autorisées, null = accès total
-  preset      String?  // slug prédéfini : verification | support | finance | moderation | commercial | custom
+  permissions String? // JSON : tableau de sections autorisées, null = accès total
+  preset      String? // slug prédéfini : verification | support | finance | moderation | commercial | custom
   createdBy   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -461,18 +461,18 @@ enum AccountType {
 }
 
 model ContentReport {
-  id           String   @id @default(uuid())
-  reporterId   String
-  contentType  String   // REVIEW | COMMENT | PORTFOLIO
-  contentId    String
-  reason       String
-  details      String?
-  status       String   @default("PENDING") // PENDING | DISMISSED | REMOVED
-  resolvedBy   String?
-  resolvedAt   DateTime?
-  createdAt    DateTime @default(now())
+  id          String    @id @default(uuid())
+  reporterId  String
+  contentType String // REVIEW | COMMENT | PORTFOLIO
+  contentId   String
+  reason      String
+  details     String?
+  status      String    @default("PENDING") // PENDING | DISMISSED | REMOVED
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
 
-  reporter     User     @relation(fields: [reporterId], references: [id])
+  reporter User @relation(fields: [reporterId], references: [id])
 
   @@index([status])
   @@index([contentType, contentId])
@@ -480,13 +480,13 @@ model ContentReport {
 }
 
 model ReviewFlag {
-  id         String   @id @default(uuid())
-  reviewId   String
-  flaggedBy  String   @default("system")
-  reason     String?
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  reviewId  String
+  flaggedBy String   @default("system")
+  reason    String?
+  createdAt DateTime @default(now())
 
-  review     Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
 
   @@index([reviewId])
 }
@@ -495,15 +495,15 @@ model PushToken {
   id        String    @id @default(uuid())
   userId    String
   token     String    @unique
-  platform  String    // 'ANDROID' | 'iOS'
-  type      String    // 'FCM' | 'APNs' | 'EXPO'
+  platform  String // 'ANDROID' | 'iOS'
+  type      String // 'FCM' | 'APNs' | 'EXPO'
   deviceId  String?
   isActive  Boolean   @default(true)
   lastUsed  DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, token])
   @@index([userId])
@@ -512,14 +512,14 @@ model PushToken {
 }
 
 model PushTokenMigrationLog {
-  id        String    @id @default(uuid())
-  userId    String
-  fromToken String?
-  toToken   String?
-  platform  String
-  status    String    // 'PENDING' | 'SUCCESS' | 'FAILED'
-  reason    String?
-  createdAt DateTime  @default(now())
+  id          String    @id @default(uuid())
+  userId      String
+  fromToken   String?
+  toToken     String?
+  platform    String
+  status      String // 'PENDING' | 'SUCCESS' | 'FAILED'
+  reason      String?
+  createdAt   DateTime  @default(now())
   completedAt DateTime?
 
   @@index([userId])
@@ -537,7 +537,7 @@ model Notification {
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([createdAt])
@@ -548,7 +548,7 @@ model BroadcastLog {
   adminId      String
   title        String
   body         String
-  target       String   // 'ALL' | 'CLIENTS' | 'PROFESSIONALS' | 'USER'
+  target       String // 'ALL' | 'CLIENTS' | 'PROFESSIONALS' | 'USER'
   targetUserId String?
   sent         Int      @default(0)
   total        Int      @default(0)
@@ -567,7 +567,7 @@ model PromoCode {
   id              String       @id @default(uuid())
   code            String       @unique
   description     String?
-  discountType    String       // 'PERCENT' | 'FIXED'
+  discountType    String // 'PERCENT' | 'FIXED'
   discountValue   Float
   maxUses         Int?
   usedCount       Int          @default(0)
@@ -597,19 +597,19 @@ model PromoUsage {
 }
 
 model Dispute {
-  id             String    @id @default(uuid())
-  paymentId      String
-  clientId       String
-  reason         String
-  description    String?
-  status         String    @default("OPEN")  // OPEN | UNDER_REVIEW | RESOLVED_REFUND | RESOLVED_PARTIAL | RESOLVED_REJECTED
-  refundAmount   Float?
-  adminNote      String?
-  resolvedBy     String?
-  resolvedAt     DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id           String    @id @default(uuid())
+  paymentId    String
+  clientId     String
+  reason       String
+  description  String?
+  status       String    @default("OPEN") // OPEN | UNDER_REVIEW | RESOLVED_REFUND | RESOLVED_PARTIAL | RESOLVED_REJECTED
+  refundAmount Float?
+  adminNote    String?
+  resolvedBy   String?
+  resolvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  payment        Payment   @relation(fields: [paymentId], references: [id])
-  client         User      @relation(fields: [clientId], references: [id])
+  payment Payment @relation(fields: [paymentId], references: [id])
+  client  User    @relation(fields: [clientId], references: [id])
 }

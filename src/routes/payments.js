@@ -93,8 +93,8 @@ async function verifyAndUpdatePayment(payment, gpData, reason = 'recheck') {
 // POST /api/payments/create-checkout
 router.post('/create-checkout', requireAuth, requireRole('CLIENT'), paymentRateLimit, async (req, res, next) => {
   try {
-    const { quoteId, isDeposit } = req.body;
-    console.log('[Payment] create-checkout called, quoteId:', quoteId, 'isDeposit:', isDeposit);
+    const { quoteId, isDeposit, paymentMethod } = req.body;
+    console.log('[Payment] create-checkout called, quoteId:', quoteId, 'isDeposit:', isDeposit, 'method:', paymentMethod);
 
     if (!quoteId) return res.status(400).json({ error: 'quoteId est requis' });
 
@@ -161,6 +161,7 @@ router.post('/create-checkout', requireAuth, requireRole('CLIENT'), paymentRateL
       projectId: quote.projectId,
       isDeposit,
       userId: req.user.id,
+      paymentMethod: paymentMethod || null,
       idempotencyKey,
       successUrl: `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/payments/success?quoteId=${quoteId}&isDeposit=${isDeposit}`,
       errorUrl: `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/payments/error?quoteId=${quoteId}`,

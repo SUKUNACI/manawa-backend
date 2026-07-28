@@ -224,15 +224,15 @@ app.use('/admin', adminIPGuard, adminPanelAuth, (req, res, next) => {
 });
 
 app.use('/admin', adminIPGuard, adminPanelAuth, express.static(adminPanelDir, {
-  setHeaders: (res, filePath) => {
-    // Forcer no-store sur dashboard.js et index.html — jamais de cache navigateur
-    if (filePath.endsWith('dashboard.js') || filePath.endsWith('index.html')) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-    }
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   }
 }));
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/api/health', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ status: 'ok' });
+});
 
 // Messagerie temps réel (Socket.IO) — authentification par token JWT
 const onlineUsers = new Map();

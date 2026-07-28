@@ -62,9 +62,10 @@ app.use((req, res, next) => {
         directives: {
           defaultSrc: ["'self'"],
           scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+          scriptSrcAttr: ["'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com"],
-          imgSrc: ["'self'", "data:", "https://*.openstreetmap.org", "https://unpkg.com"],
+          imgSrc: ["'self'", "data:", "https://*.openstreetmap.org", "https://unpkg.com", "https://*.tile.openstreetmap.org"],
           connectSrc: ["'self'", "https://api.ipify.org"],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],

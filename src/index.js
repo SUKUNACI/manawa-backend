@@ -58,7 +58,20 @@ const ADMIN_PANEL_PATH_EARLY = process.env.ADMIN_PANEL_PATH || '/admin';
 app.use((req, res, next) => {
   if (req.path.startsWith(ADMIN_PANEL_PATH_EARLY) || req.path.startsWith('/admin')) {
     return helmet({
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "https://*.openstreetmap.org", "https://unpkg.com"],
+          connectSrc: ["'self'", "https://api.ipify.org"],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          formAction: ["'self'"],
+          baseUri: ["'self'"],
+        },
+      },
       frameguard: { action: 'deny' },
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     })(req, res, next);

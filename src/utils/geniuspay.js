@@ -33,7 +33,6 @@ async function createPayment(payload) {
         projectId: payload.projectId,
         isDeposit: payload.isDeposit,
         userId: payload.userId,
-        paymentMethod: payload.paymentMethod || null,
       },
       success_url: payload.successUrl,
       error_url: payload.errorUrl,

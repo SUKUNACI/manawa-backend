@@ -86,9 +86,10 @@ app.use((req, res, next) => {
 });
 
 // Cache-Control: no-store sur les routes API sensibles (corrige ZAP alert)
+// req.originalUrl contient le chemin complet (/api/auth/login), pas req.path (/login)
 const SENSITIVE_API_PATHS = ['/api/auth', '/api/payments', '/api/users', '/api/admin', '/api/verification', '/api/subscriptions'];
 app.use((req, res, next) => {
-  if (SENSITIVE_API_PATHS.some(p => req.path.startsWith(p))) {
+  if (SENSITIVE_API_PATHS.some(p => req.originalUrl.startsWith(p))) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Pragma', 'no-cache');
   }

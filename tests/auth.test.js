@@ -2,6 +2,8 @@ const request = require('supertest');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 
+const TEST_PASSWORD = process.env.TEST_USER_PASSWORD || 'Test@Manawa2024!';
+
 // Mock Prisma avant tout import de route
 jest.mock('../src/config/db', () => ({
   user: {
@@ -56,7 +58,7 @@ describe('POST /api/auth/register', () => {
       .post('/api/auth/register')
       .send({
         email: 'test@manawa.com',
-        password: 'password123',
+        password: TEST_PASSWORD,
         firstName: 'Jean',
         lastName: 'Dupont',
         role: 'CLIENT',
@@ -75,7 +77,7 @@ describe('POST /api/auth/register', () => {
       .post('/api/auth/register')
       .send({
         email: 'exist@manawa.com',
-        password: 'password123',
+        password: TEST_PASSWORD,
         firstName: 'Jean',
         lastName: 'Dupont',
         role: 'CLIENT',
@@ -90,7 +92,7 @@ describe('POST /api/auth/register', () => {
       .post('/api/auth/register')
       .send({
         email: 'pasunemail',
-        password: 'password123',
+        password: TEST_PASSWORD,
         firstName: 'Jean',
         lastName: 'Dupont',
         role: 'CLIENT',
@@ -119,7 +121,7 @@ describe('POST /api/auth/register', () => {
       .post('/api/auth/register')
       .send({
         email: 'test@manawa.com',
-        password: 'password123',
+        password: TEST_PASSWORD,
         firstName: 'Jean',
         lastName: 'Dupont',
         role: 'ADMIN',
@@ -149,7 +151,7 @@ describe('POST /api/auth/register', () => {
       .post('/api/auth/register')
       .send({
         email: 'pro@manawa.com',
-        password: 'password123',
+        password: TEST_PASSWORD,
         firstName: 'Marie',
         lastName: 'Martin',
         role: 'PROFESSIONAL',
@@ -163,7 +165,7 @@ describe('POST /api/auth/register', () => {
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 
 describe('POST /api/auth/login', () => {
-  const hashedPassword = bcrypt.hashSync('password123', 10);
+  const hashedPassword = bcrypt.hashSync(TEST_PASSWORD, 10);
 
   beforeEach(() => {
     prisma.user.findUnique.mockResolvedValue({
@@ -187,7 +189,7 @@ describe('POST /api/auth/login', () => {
   test('retourne un token avec les bons identifiants', async () => {
     const res = await request(app)
       .post('/api/auth/login')
-      .send({ email: 'test@manawa.com', password: 'password123' });
+      .send({ email: 'test@manawa.com', password: TEST_PASSWORD });
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('token');
@@ -209,7 +211,7 @@ describe('POST /api/auth/login', () => {
 
     const res = await request(app)
       .post('/api/auth/login')
-      .send({ email: 'inconnu@manawa.com', password: 'password123' });
+      .send({ email: 'inconnu@manawa.com', password: TEST_PASSWORD });
 
     expect(res.status).toBe(401);
   });
@@ -226,7 +228,7 @@ describe('POST /api/auth/login', () => {
 
     const res = await request(app)
       .post('/api/auth/login')
-      .send({ email: 'test@manawa.com', password: 'password123' });
+      .send({ email: 'test@manawa.com', password: TEST_PASSWORD });
 
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/suspendu/i);
@@ -244,7 +246,7 @@ describe('POST /api/auth/login', () => {
 
     const res = await request(app)
       .post('/api/auth/login')
-      .send({ email: 'test@manawa.com', password: 'password123' });
+      .send({ email: 'test@manawa.com', password: TEST_PASSWORD });
 
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/supprimé/i);
@@ -253,7 +255,7 @@ describe('POST /api/auth/login', () => {
   test('retourne 400 si email manquant', async () => {
     const res = await request(app)
       .post('/api/auth/login')
-      .send({ password: 'password123' });
+      .send({ password: TEST_PASSWORD });
 
     expect(res.status).toBe(400);
   });

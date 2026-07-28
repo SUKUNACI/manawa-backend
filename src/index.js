@@ -52,7 +52,8 @@ const allowedOrigins = process.env.CORS_ORIGINS
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
-// Helmet : CSP désactivé sur le panel admin (onclick inline + scripts CDN), X-Frame-Options=DENY partout
+// Helmet : CSP désactivée sur le panel admin (onclick inline + scripts CDN)
+// Routes API : CSP restrictive + headers sécurité complets (corrige ZAP alerts)
 const ADMIN_PANEL_PATH_EARLY = process.env.ADMIN_PANEL_PATH || '/admin';
 app.use((req, res, next) => {
   if (req.path.startsWith(ADMIN_PANEL_PATH_EARLY) || req.path.startsWith('/admin')) {
@@ -63,9 +64,35 @@ app.use((req, res, next) => {
     })(req, res, next);
   }
   return helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        scriptSrc: ["'none'"],
+        styleSrc: ["'none'"],
+        imgSrc: ["'none'"],
+        connectSrc: ["'none'"],
+        fontSrc: ["'none'"],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'none'"],
+        frameSrc: ["'none'"],
+        formAction: ["'none'"],
+        frameAncestors: ["'none'"],
+        baseUri: ["'none'"],
+      },
+    },
     frameguard: { action: 'deny' },
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   })(req, res, next);
+});
+
+// Cache-Control: no-store sur les routes API sensibles (corrige ZAP alert)
+const SENSITIVE_API_PATHS = ['/api/auth', '/api/payments', '/api/users', '/api/admin', '/api/verification', '/api/subscriptions'];
+app.use((req, res, next) => {
+  if (SENSITIVE_API_PATHS.some(p => req.path.startsWith(p))) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+  }
+  next();
 });
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));

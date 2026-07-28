@@ -16,6 +16,22 @@ function generateCompanyCode() {
   return code;
 }
 
+// Champs utilisateur exposables publiquement — jamais de hash, codes OTP, tokens push
+const PUBLIC_USER_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  avatarUrl: true,
+  city: true,
+  latitude: true,
+  longitude: true,
+  role: true,
+  emailVerified: true,
+  phoneVerified: true,
+  suspended: true,
+  createdAt: true,
+};
+
 function distanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -39,7 +55,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
         averageRating: minRating ? { gte: parseFloat(minRating) } : undefined,
         user: city ? { city } : undefined,
       },
-      include: { user: true, portfolio: true, subscription: true },
+      include: { user: { select: PUBLIC_USER_SELECT }, portfolio: true, subscription: true },
       orderBy: { averageRating: 'desc' },
       take: limit,
       skip: (page - 1) * limit,
@@ -87,7 +103,7 @@ router.get('/featured/random', optionalAuth, async (req, res, next) => {
   try {
     const premiumPros = await prisma.professional.findMany({
       where: { subscription: { status: 'ACTIVE', expiresAt: { gt: new Date() } } },
-      include: { user: true, portfolio: true },
+      include: { user: { select: PUBLIC_USER_SELECT }, portfolio: true },
     });
 
     const shuffled = premiumPros.sort(() => Math.random() - 0.5).slice(0, 5);
@@ -520,7 +536,7 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
     if (pro.accountType === 'ENTREPRISE') {
       const members = await prisma.companyMember.findMany({
         where: { companyId: pro.id, status: 'ACTIVE' },
-        include: { member: { include: { user: true, portfolio: true } } },
+        include: { member: { include: { user: { select: PUBLIC_USER_SELECT }, portfolio: true } } },
       });
       if (members.length > 0) {
         const memberScores = members.map(m => computeTrustScore(m.member, {}));

@@ -27,6 +27,21 @@ async function seedConfig() {
       update: {}, // ne pas écraser si déjà présent
     });
   }
+
+  // Migration des IPs de la variable d'env vers la DB (exécuté une seule fois)
+  const envIPs = process.env.ADMIN_ALLOWED_IPS
+    ? process.env.ADMIN_ALLOWED_IPS.split(',').map(ip => ip.trim()).filter(Boolean)
+    : [];
+  if (envIPs.length > 0) {
+    const existing = await prisma.appConfig.findUnique({ where: { key: 'admin_allowed_ips' } });
+    if (!existing) {
+      const entries = envIPs.map(ip => ({ ip, label: 'Migré depuis variable d\'env', addedBy: 'system', addedAt: new Date().toISOString() }));
+      await prisma.appConfig.create({
+        data: { key: 'admin_allowed_ips', value: JSON.stringify(entries), description: 'IPs autorisées à accéder au panel admin' },
+      });
+      console.log(`[Config] ${envIPs.length} IP(s) migrées de ADMIN_ALLOWED_IPS vers la DB`);
+    }
+  }
 }
 
 // Lire une config (retourne la valeur typée si possible)
@@ -58,4 +73,44 @@ async function getAllConfig() {
   return result;
 }
 
-module.exports = { getConfig, getAllConfig, seedConfig, DEFAULTS };
+// Garantit que le Super Admin principal a toujours adminLevel='SUPER' et sa question secrète
+// Protège contre les migrations Prisma ou reseeds qui remettent ces champs à null
+async function ensureSuperAdmin() {
+  const email = process.env.SUPER_ADMIN_EMAIL;
+  if (!email) return;
+  try {
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, adminLevel: true, securityQuestion: true, securityAnswerHash: true },
+    });
+    if (!user) return;
+
+    const updates = {};
+
+    if (user.adminLevel !== 'SUPER') {
+      updates.adminLevel = 'SUPER';
+    }
+
+    if (!user.securityQuestion || !user.securityAnswerHash) {
+      const backup = await prisma.appConfig.findUnique({ where: { key: 'super_admin_security' } });
+      if (backup) {
+        try {
+          const { question, answerHash } = JSON.parse(backup.value);
+          if (question && answerHash) {
+            updates.securityQuestion = question;
+            updates.securityAnswerHash = answerHash;
+          }
+        } catch {}
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await prisma.user.update({ where: { email }, data: updates });
+      console.log(`[Boot] Super admin restauré pour ${email}:`, Object.keys(updates).join(', '));
+    }
+  } catch (err) {
+    console.error('[Boot] Erreur ensureSuperAdmin:', err.message);
+  }
+}
+
+module.exports = { getConfig, getAllConfig, seedConfig, ensureSuperAdmin, DEFAULTS };

@@ -47,7 +47,7 @@ async function doLogin() {
       body: JSON.stringify({ token: data.token }),
     });
 
-    window.location.href = '/admin/';
+    window.location.href = window.location.pathname.replace(/\/login\.html$/, '') + '/';
   } catch {
     err.textContent = 'Erreur réseau, réessayez';
     err.style.display = 'block';

@@ -13,7 +13,7 @@ const REFRESH_TOKEN_TTL = 30 * 24 * 60 * 60 * 1000; // 30 jours en ms
 
 function generateAccessToken(user) {
   return jwt.sign(
-    { id: user.id, role: user.role, email: user.email },
+    { id: user.id, role: user.role, email: user.email, adminLevel: user.adminLevel || null, adminPermissions: user.adminPermissions || null },
     process.env.JWT_SECRET,
     { expiresIn: ACCESS_TOKEN_TTL }
   );
@@ -173,6 +173,7 @@ router.post('/logout', async (req, res, next) => {
       await prisma.refreshToken.deleteMany({ where: { token: refreshToken } });
     }
     res.clearCookie('adminToken');
+    res.clearCookie('adminCsrf');
     res.json({ loggedOut: true });
   } catch (err) {
     next(err);
@@ -186,15 +187,61 @@ router.post('/admin-session', async (req, res) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     if (decoded.role !== 'ADMIN') return res.status(403).json({ error: 'Accès refusé' });
+
+    // Enregistrer la dernière connexion admin
+    await prisma.user.update({ where: { id: decoded.id }, data: { lastLoginAt: new Date() } }).catch(() => {});
+
+    const csrfToken = crypto.randomBytes(32).toString('hex');
     res.cookie('adminToken', token, {
       httpOnly: true,
       secure: true,
-      sameSite: 'lax',
-      maxAge: 15 * 60 * 1000, // 15 min, durée de l'access token
+      sameSite: 'strict',
+      maxAge: 15 * 60 * 1000,
+    });
+    res.cookie('adminCsrf', csrfToken, {
+      httpOnly: false,
+      secure: true,
+      sameSite: 'strict',
+      maxAge: 15 * 60 * 1000,
     });
     res.json({ ok: true });
   } catch {
     res.status(401).json({ error: 'Token invalide' });
+  }
+});
+
+// POST /api/auth/admin-renew — renouvelle le cookie adminToken depuis le cookie actuel
+// Appelé silencieusement par le back-office toutes les 10 min pour éviter l'expiration
+router.post('/admin-renew', async (req, res) => {
+  const token = req.cookies?.adminToken;
+  if (!token) return res.status(401).json({ error: 'Non authentifié' });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.role !== 'ADMIN') return res.status(403).json({ error: 'Accès refusé' });
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: { id: true, role: true, email: true, suspended: true, adminLevel: true, adminPermissions: true },
+    });
+    if (!user || user.suspended) return res.status(403).json({ error: 'Accès refusé' });
+
+    const newToken = generateAccessToken(user);
+    const newCsrf = crypto.randomBytes(32).toString('hex');
+    res.cookie('adminToken', newToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'strict',
+      maxAge: 15 * 60 * 1000,
+    });
+    res.cookie('adminCsrf', newCsrf, {
+      httpOnly: false,
+      secure: true,
+      sameSite: 'strict',
+      maxAge: 15 * 60 * 1000,
+    });
+    res.json({ ok: true });
+  } catch {
+    res.status(401).json({ error: 'Session expirée' });
   }
 });
 

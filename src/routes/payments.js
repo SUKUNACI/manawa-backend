@@ -350,8 +350,9 @@ router.get('/ping-geniuspay', requireAuth, requireRole('ADMIN'), async (req, res
 
 // GET /api/payments/success — redirige vers l'app via deep link
 router.get('/success', (req, res) => {
-  const quoteId = (req.query.quoteId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  const quoteId = encodeURIComponent((req.query.quoteId || '').replace(/[^a-zA-Z0-9_-]/g, ''));
   const deepLink = `manawa://payment/success?quoteId=${quoteId}`;
+  const deepLinkEncoded = deepLink.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
   res.send(`
     <html>
       <head>
@@ -364,18 +365,16 @@ router.get('/success', (req, res) => {
           p { color: #9CA3AF; font-size: 15px; line-height: 1.5; }
           .btn { display: inline-block; margin-top: 32px; background: #F4720B; color: #fff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-size: 16px; font-weight: 600; }
         </style>
-        <script>
-          window.onload = function() {
-            window.location.href = '${deepLink}';
-            setTimeout(function() {}, 3000);
-          };
-        </script>
       </head>
       <body>
         <div class="icon">✅</div>
         <h2>Paiement réussi !</h2>
         <p>Votre paiement a été traité avec succès.<br>Retour automatique sur MANAWA...</p>
-        <a class="btn" href="${deepLink}">Retourner sur MANAWA</a>
+        <a class="btn" href="${deepLinkEncoded}">Retourner sur MANAWA</a>
+        <script>
+          var dl = document.querySelector('.btn').getAttribute('href');
+          window.onload = function() { window.location.href = dl; };
+        </script>
       </body>
     </html>
   `);
@@ -383,8 +382,9 @@ router.get('/success', (req, res) => {
 
 // GET /api/payments/error — redirige vers l'app via deep link
 router.get('/error', (req, res) => {
-  const quoteId = (req.query.quoteId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  const quoteId = encodeURIComponent((req.query.quoteId || '').replace(/[^a-zA-Z0-9_-]/g, ''));
   const deepLink = `manawa://payment/error?quoteId=${quoteId}`;
+  const deepLinkEncoded = deepLink.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
   res.send(`
     <html>
       <head>
@@ -397,17 +397,16 @@ router.get('/error', (req, res) => {
           p { color: #9CA3AF; font-size: 15px; line-height: 1.5; }
           .btn { display: inline-block; margin-top: 32px; background: #F4720B; color: #fff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-size: 16px; font-weight: 600; }
         </style>
-        <script>
-          window.onload = function() {
-            window.location.href = '${deepLink}';
-          };
-        </script>
       </head>
       <body>
         <div class="icon">❌</div>
         <h2>Paiement échoué</h2>
         <p>Une erreur s'est produite lors du paiement.<br>Retour automatique sur MANAWA...</p>
-        <a class="btn" href="${deepLink}">Retourner sur MANAWA</a>
+        <a class="btn" href="${deepLinkEncoded}">Retourner sur MANAWA</a>
+        <script>
+          var dl = document.querySelector('.btn').getAttribute('href');
+          window.onload = function() { window.location.href = dl; };
+        </script>
       </body>
     </html>
   `);

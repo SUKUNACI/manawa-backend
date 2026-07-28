@@ -18,19 +18,26 @@ router.post('/', requireAuth, requireRole('CLIENT'), createReviewLimiter, async 
   try {
     const { professionalId, rating, comment, projectId } = req.body;
 
-    if (!professionalId || !rating) {
-      return res.status(400).json({ error: 'professionalId et rating sont requis' });
+    if (!professionalId || !rating || !projectId) {
+      return res.status(400).json({ error: 'professionalId, rating et projectId sont requis' });
     }
     if (rating < 1 || rating > 5 || !Number.isInteger(rating)) {
       return res.status(400).json({ error: 'La note doit être un entier entre 1 et 5' });
     }
 
-    if (projectId) {
-      const project = await prisma.project.findUnique({ where: { id: projectId }, include: { review: true } });
-      if (!project || project.clientId !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
-      if (project.status !== 'COMPLETED') return res.status(400).json({ error: 'La mission doit être terminée pour laisser un avis' });
-      if (project.review) return res.status(409).json({ error: 'Vous avez déjà laissé un avis pour cette mission' });
-    }
+    // Vérifier que le client est bien le propriétaire du projet, que la mission est terminée,
+    // et qu'il n'a pas déjà laissé un avis — obligatoire, pas optionnel
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        review: true,
+        quotes: { where: { status: 'ACCEPTED', professionalId }, select: { id: true } },
+      },
+    });
+    if (!project || project.clientId !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
+    if (project.status !== 'COMPLETED') return res.status(400).json({ error: 'La mission doit être terminée pour laisser un avis' });
+    if (project.review) return res.status(409).json({ error: 'Vous avez déjà laissé un avis pour cette mission' });
+    if (project.quotes.length === 0) return res.status(403).json({ error: 'Vous n\'avez pas eu de mission avec ce professionnel' });
 
     const review = await prisma.review.create({
       data: { authorId: req.user.id, professionalId, rating, comment, projectId: projectId || undefined },

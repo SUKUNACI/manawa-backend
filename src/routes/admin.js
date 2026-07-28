@@ -1,29 +1,261 @@
 const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, requireSuperAdmin } = require('../middleware/auth');
 const { sendPushNotification, sendPushToMultiple } = require('../config/pushNotifications');
 const { computeTrustScore, getTrustScoreBreakdown } = require('../utils/trustScore');
 const { getConfig, getAllConfig } = require('../utils/appConfig');
+const { refundPayment } = require('../utils/geniuspay');
 
 const router = express.Router();
+
+// Rate limiting global sur le router admin
+const adminReadLimit = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, message: { error: 'Trop de requêtes — réessayez dans une minute' } });
+const adminWriteLimit = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { error: 'Trop de requêtes — réessayez dans une minute' } });
+router.use((req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return adminReadLimit(req, res, next);
+  return adminWriteLimit(req, res, next);
+});
 
 // Tous les endpoints admin nécessitent authentification + rôle ADMIN
 router.use(requireAuth, requireRole('ADMIN'));
 
-// GET /api/admin/me — infos d'affichage de l'admin connecté (ne passe jamais par localStorage)
+// Vérification CSRF : pour toute opération d'écriture, le header X-CSRF-Token
+// doit correspondre au cookie adminCsrf (Double Submit Cookie pattern)
+router.use((req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const headerToken = req.headers['x-csrf-token'];
+  const cookieToken = req.cookies?.adminCsrf;
+  if (!headerToken || !cookieToken || headerToken !== cookieToken) {
+    return res.status(403).json({ error: 'Token CSRF invalide' });
+  }
+  next();
+});
+
+// Middleware de permissions granulaires pour les admins STANDARD
+// Les super admins et les admins sans restrictions (adminPermissions === null) passent toujours.
+const SECTION_PREFIXES = {
+  'verif-id':      ['/professionals/', '/professionals'],
+  'users-all':     ['/users-all', '/users'],
+  'professionals': ['/professionals/', '/professionals'],
+  'clients':       ['/users'],
+  'projects':      ['/projects'],
+  'payments':      ['/payments'],
+  'audit':         ['/audit-logs'],
+  'analytics':     ['/analytics'],
+  'moderation':    ['/moderation'],
+  'security':      ['/security'],
+  'market':        ['/market'],
+  'subscriptions': ['/subscriptions'],
+  'disputes':      ['/disputes'],
+  'reviews':       ['/reviews'],
+  'companies':     ['/companies'],
+  'portfolio':     ['/portfolio'],
+  'promos':        ['/promos'],
+  'quotes-admin':  ['/quotes'],
+  'push':          ['/notifications'],
+  'messaging':     ['/messaging'],
+  'support':       ['/support'],
+  'deleted':       ['/users-deleted'],
+  'communication': ['/communication'],
+};
+
+router.use((req, res, next) => {
+  // Super admin ou pas de restrictions → passe
+  if (!req.user || req.user.adminLevel === 'SUPER' || !req.user.adminPermissions) return next();
+
+  let allowed;
+  try { allowed = JSON.parse(req.user.adminPermissions); } catch { return res.status(403).json({ error: 'Permissions invalides — contactez le super admin' }); }
+  if (!Array.isArray(allowed)) return res.status(403).json({ error: 'Format de permissions invalide — contactez le super admin' });
+
+  const path = req.path; // ex: "/support/tickets/123"
+
+  // Routes exclues du contrôle (lecture du profil, alertes, dashboard)
+  const FREE_PREFIXES = ['/me', '/alerts', '/dashboard', '/admin-logs', '/admins', '/teams'];
+  if (FREE_PREFIXES.some(p => path === p || path.startsWith(p + '/'))) return next();
+
+  // Chercher si la section correspondant à ce préfixe est autorisée
+  for (const [section, prefixes] of Object.entries(SECTION_PREFIXES)) {
+    if (prefixes.some(p => path === p || path.startsWith(p + '/') || path.startsWith(p + '?'))) {
+      if (!allowed.includes(section)) {
+        return res.status(403).json({ error: 'Accès non autorisé à cette section (' + section + ')' });
+      }
+      return next();
+    }
+  }
+
+  // Préfixe inconnu → bloquer par défaut pour éviter tout bypass silencieux
+  return res.status(403).json({ error: 'Accès non autorisé (section non répertoriée)' });
+});
+
+// Helper : écrire une entrée dans le journal d'actions admin
+async function writeAdminLog(req, action, targetType, targetId, metadata) {
+  try {
+    await prisma.adminLog.create({
+      data: {
+        adminId:    req.user?.id || 'system',
+        action,
+        targetType: targetType || null,
+        targetId:   targetId   || null,
+        metadata:   metadata ? JSON.stringify(metadata) : null,
+        ipAddress:  req.ip || null,
+      },
+    });
+  } catch {}
+}
+
+// GET /api/admin/me — infos d'affichage de l'admin connecté
 router.get('/me', async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
-    select: { firstName: true, lastName: true, email: true },
+    select: { firstName: true, lastName: true, email: true, adminLevel: true, securityQuestion: true, adminPermissions: true },
   });
   res.json(user || {});
 });
 
-// POST /api/admin/create-admin — créer un compte administrateur
-// Réservé à l'admin connecté, protégé par requireAuth + requireRole('ADMIN') ci-dessus
-router.post('/create-admin', async (req, res, next) => {
+// GET /api/admin/alerts — alertes critiques pour la topbar (polling toutes les 60s)
+router.get('/alerts', async (req, res, next) => {
+  try {
+    const now          = new Date();
+    const twoDaysAgo   = new Date(now - 2 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+
+    const [pendingVerif, urgentTickets, openDisputes, pendingPayments] = await Promise.all([
+      prisma.professional.count({ where: { identityStatus: 'PENDING', user: { deletedAt: null } } }),
+      prisma.supportTicket.count({ where: { status: 'OPEN', createdAt: { lte: twoDaysAgo } } }),
+      prisma.dispute.count({ where: { status: 'OPEN', createdAt: { lte: sevenDaysAgo } } }),
+      prisma.payment.count({ where: { status: 'pending', createdAt: { lte: twoDaysAgo } } }),
+    ]);
+
+    const alerts = [];
+    if (pendingVerif > 0)    alerts.push({ type: 'VERIF',   level: 'warning', count: pendingVerif,    label: pendingVerif    + ' vérification'  + (pendingVerif    > 1 ? 's' : '') + ' en attente',         page: 'verif-id'  });
+    if (urgentTickets > 0)   alerts.push({ type: 'SUPPORT', level: 'urgent',  count: urgentTickets,   label: urgentTickets   + ' ticket'         + (urgentTickets   > 1 ? 's' : '') + ' ouverts > 48h',      page: 'support'   });
+    if (openDisputes > 0)    alerts.push({ type: 'DISPUTE', level: 'urgent',  count: openDisputes,    label: openDisputes    + ' litige'         + (openDisputes    > 1 ? 's' : '') + ' non résolu'  + (openDisputes > 1 ? 's' : '') + ' > 7j', page: 'disputes' });
+    if (pendingPayments > 0) alerts.push({ type: 'PAYMENT', level: 'warning', count: pendingPayments, label: pendingPayments + ' paiement'       + (pendingPayments > 1 ? 's' : '') + ' en attente > 48h',    page: 'payments'  });
+
+    res.json({ alerts, total: alerts.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/admin-logs — journal des actions admin (super admin seulement)
+router.get('/admin-logs', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 30);
+    const skip  = (page - 1) * limit;
+    const { adminId, action, dateFrom, dateTo } = req.query;
+
+    const where = {};
+    if (adminId) where.adminId = adminId;
+    if (action)  where.action  = { contains: action, mode: 'insensitive' };
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+      if (dateTo)   where.createdAt.lte = new Date(dateTo + 'T23:59:59.999Z');
+    }
+
+    const [logs, total] = await Promise.all([
+      prisma.adminLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: limit }),
+      prisma.adminLog.count({ where }),
+    ]);
+
+    // Enrichir avec le nom de l'admin
+    const adminIds = [...new Set(logs.map(l => l.adminId))];
+    const admins = await prisma.user.findMany({
+      where: { id: { in: adminIds } },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+    const adminMap = Object.fromEntries(admins.map(a => [a.id, a]));
+    const enriched = logs.map(l => ({ ...l, admin: adminMap[l.adminId] || null }));
+
+    res.json({ logs: enriched, total, page, totalPages: Math.ceil(total / limit) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/me/security-setup — configurer la question secrète (une seule fois, immuable ensuite)
+router.post('/me/security-setup', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { currentPassword, question, answer } = req.body;
+    if (!currentPassword || !question || !answer) {
+      return res.status(400).json({ error: 'Mot de passe actuel, question et réponse sont requis' });
+    }
+    if (answer.trim().length < 2) {
+      return res.status(400).json({ error: 'La réponse doit contenir au moins 2 caractères' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { passwordHash: true, securityAnswerHash: true },
+    });
+
+    if (user.securityAnswerHash) {
+      return res.status(403).json({ error: 'La question secrète est déjà configurée et ne peut plus être modifiée.' });
+    }
+
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) return res.status(403).json({ error: 'Mot de passe actuel incorrect' });
+
+    const answerHash = await bcrypt.hash(answer.trim().toLowerCase(), 12);
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { securityQuestion: question.trim(), securityAnswerHash: answerHash },
+    });
+    // Sauvegarde dans AppConfig pour restauration automatique au démarrage
+    await prisma.appConfig.upsert({
+      where: { key: 'super_admin_security' },
+      create: { key: 'super_admin_security', value: JSON.stringify({ question: question.trim(), answerHash }), description: 'Backup question secrète super admin' },
+      update: { value: JSON.stringify({ question: question.trim(), answerHash }) },
+    });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/me/change-password — changer le mot de passe (ancien mdp + réponse question secrète)
+router.post('/me/change-password', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { currentPassword, securityAnswer, newPassword } = req.body;
+    if (!currentPassword || !securityAnswer || !newPassword) {
+      return res.status(400).json({ error: 'Tous les champs sont requis' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 8 caractères' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { passwordHash: true, securityAnswerHash: true, securityQuestion: true },
+    });
+
+    if (!user.securityAnswerHash) {
+      return res.status(400).json({ error: 'Aucune question secrète configurée. Configurez-la d\'abord.' });
+    }
+
+    const [pwOk, answerOk] = await Promise.all([
+      bcrypt.compare(currentPassword, user.passwordHash),
+      bcrypt.compare(securityAnswer.trim().toLowerCase(), user.securityAnswerHash),
+    ]);
+
+    if (!pwOk)     return res.status(403).json({ error: 'Mot de passe actuel incorrect' });
+    if (!answerOk) return res.status(403).json({ error: 'Réponse à la question secrète incorrecte' });
+
+    const newHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({ where: { id: req.user.id }, data: { passwordHash: newHash } });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/create-admin — créer un compte administrateur STANDARD (super admin seulement)
+router.post('/create-admin', requireSuperAdmin, async (req, res, next) => {
   try {
     const { email, password, firstName, lastName } = req.body;
     if (!email || !password || !firstName || !lastName) {
@@ -35,12 +267,346 @@ router.post('/create-admin', async (req, res, next) => {
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) return res.status(409).json({ error: 'Cet email est déjà utilisé' });
 
+    // Garde absolue : on ne crée que des admins STANDARD, jamais SUPER
     const passwordHash = await bcrypt.hash(password, 12);
     const admin = await prisma.user.create({
-      data: { email, passwordHash, firstName, lastName, role: 'ADMIN' },
+      data: { email, passwordHash, firstName, lastName, role: 'ADMIN', adminLevel: 'STANDARD' },
     });
     const { passwordHash: _, ...safe } = admin;
     res.status(201).json(safe);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/admins — liste des comptes administrateurs (super admin seulement)
+router.get('/admins', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const admins = await prisma.user.findMany({
+      where: { role: 'ADMIN', deletedAt: null },
+      select: {
+        id: true, email: true, firstName: true, lastName: true,
+        adminLevel: true, suspended: true, createdAt: true,
+        lastLoginAt: true, adminPermissions: true, adminTeamId: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Enrichir avec les données complètes de l'équipe (nom, couleur, permissions, preset)
+    const teamIds = [...new Set(admins.map(a => a.adminTeamId).filter(Boolean))];
+    const teams = teamIds.length
+      ? await prisma.adminTeam.findMany({
+          where: { id: { in: teamIds } },
+          select: { id: true, name: true, color: true, permissions: true, preset: true },
+        })
+      : [];
+    const teamMap = Object.fromEntries(teams.map(t => [t.id, t]));
+
+    const enriched = admins.map(a => ({ ...a, team: a.adminTeamId ? teamMap[a.adminTeamId] || null : null }));
+    res.json({ admins: enriched });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/admins/:id/suspend — suspendre un admin STANDARD
+router.patch('/admins/:id/suspend', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target || target.role !== 'ADMIN') return res.status(404).json({ error: 'Admin introuvable' });
+    if (target.adminLevel === 'SUPER') return res.status(403).json({ error: 'Impossible de suspendre le super admin' });
+    if (target.id === req.user.id) return res.status(403).json({ error: 'Vous ne pouvez pas vous suspendre vous-même' });
+    await prisma.user.update({ where: { id: req.params.id }, data: { suspended: true } });
+    await writeAdminLog(req, 'ADMIN_SUSPEND', 'User', req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/admins/:id/reactivate — réactiver un admin STANDARD
+router.patch('/admins/:id/reactivate', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target || target.role !== 'ADMIN') return res.status(404).json({ error: 'Admin introuvable' });
+    if (target.adminLevel === 'SUPER') return res.status(403).json({ error: 'Impossible de modifier le super admin' });
+    await prisma.user.update({ where: { id: req.params.id }, data: { suspended: false } });
+    await writeAdminLog(req, 'ADMIN_REACTIVATE', 'User', req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/admin/admins/:id — supprimer un admin STANDARD
+router.delete('/admins/:id', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target || target.role !== 'ADMIN') return res.status(404).json({ error: 'Admin introuvable' });
+    if (target.adminLevel === 'SUPER') return res.status(403).json({ error: 'Impossible de supprimer le super admin' });
+    if (target.id === req.user.id) return res.status(403).json({ error: 'Vous ne pouvez pas supprimer votre propre compte' });
+    await prisma.user.delete({ where: { id: req.params.id } });
+    await writeAdminLog(req, 'ADMIN_DELETE', 'User', req.params.id, { email: target.email });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/admins/:id/reset-password — réinitialiser le mot de passe d'un admin STANDARD
+router.patch('/admins/:id/reset-password', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 8 caractères' });
+    }
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target || target.role !== 'ADMIN') return res.status(404).json({ error: 'Admin introuvable' });
+    if (target.adminLevel === 'SUPER') return res.status(403).json({ error: 'Impossible de modifier le mot de passe du super admin via cette route' });
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({ where: { id: req.params.id }, data: { passwordHash } });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/admins/:id/profile — modifier le profil d'un admin STANDARD
+router.patch('/admins/:id/profile', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { firstName, lastName, email } = req.body;
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target || target.role !== 'ADMIN') return res.status(404).json({ error: 'Admin introuvable' });
+    if (target.adminLevel === 'SUPER') return res.status(403).json({ error: 'Impossible de modifier le profil du super admin via cette route' });
+
+    // Vérifier unicité email si changé
+    if (email && email !== target.email) {
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing) return res.status(409).json({ error: 'Cet email est déjà utilisé' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.params.id },
+      data: {
+        ...(firstName && { firstName }),
+        ...(lastName  && { lastName }),
+        ...(email     && { email }),
+      },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+    await writeAdminLog(req, 'ADMIN_PROFILE_UPDATE', 'User', req.params.id, { fields: Object.keys(req.body) });
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/admins/:id/permissions — définir les permissions manuelles d'un admin STANDARD
+// Si l'admin est dans une équipe, le détache automatiquement (permissions manuelles priment)
+router.patch('/admins/:id/permissions', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { permissions } = req.body;
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target || target.role !== 'ADMIN') return res.status(404).json({ error: 'Admin introuvable' });
+    if (target.adminLevel === 'SUPER') return res.status(403).json({ error: 'Impossible de restreindre le super admin' });
+
+    const serialized = permissions === null ? null : JSON.stringify(permissions);
+    const updates = { adminPermissions: serialized };
+
+    // Détacher de l'équipe si on définit des permissions manuelles spécifiques
+    if (permissions !== null && target.adminTeamId) {
+      updates.adminTeamId = null;
+    }
+
+    await prisma.user.update({ where: { id: req.params.id }, data: updates });
+    await writeAdminLog(req, 'ADMIN_PERMISSIONS_UPDATE', 'User', req.params.id, {
+      permissions,
+      detachedFromTeam: !!updates.adminTeamId,
+    });
+    res.json({ success: true, detachedFromTeam: permissions !== null && !!target.adminTeamId });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Profils de permissions par équipe prédéfinie
+const TEAM_PRESETS = {
+  verification: {
+    label: 'Vérification',
+    description: 'Vérifie les documents et identités des professionnels',
+    color: '#3b82f6',
+    permissions: ['verif-id', 'professionals'],
+  },
+  support: {
+    label: 'Support',
+    description: 'Gère les tickets et la communication avec les utilisateurs',
+    color: '#22c55e',
+    permissions: ['support', 'communication', 'clients', 'users-all'],
+  },
+  finance: {
+    label: 'Finance',
+    description: 'Suit les paiements, remboursements et commissions',
+    color: '#e8b84b',
+    permissions: ['payments', 'subscriptions', 'analytics', 'disputes'],
+  },
+  moderation: {
+    label: 'Modération',
+    description: 'Gère les signalements, avis et comptes suspects',
+    color: '#ef4444',
+    permissions: ['moderation', 'reviews', 'disputes', 'deleted'],
+  },
+  commercial: {
+    label: 'Commercial',
+    description: 'Suit les abonnements, promotions et statistiques marché',
+    color: '#8b5cf6',
+    permissions: ['market', 'subscriptions', 'analytics', 'promos'],
+  },
+  custom: {
+    label: 'Personnalisée',
+    description: 'Permissions définies manuellement',
+    color: '#f4720b',
+    permissions: null,
+  },
+};
+
+// PATCH /api/admin/admins/:id/team — assigner un admin à une équipe
+// Synchronise automatiquement les permissions de l'admin avec celles de l'équipe
+router.patch('/admins/:id/team', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { teamId } = req.body;
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target || target.role !== 'ADMIN') return res.status(404).json({ error: 'Admin introuvable' });
+    if (target.adminLevel === 'SUPER') return res.status(403).json({ error: 'Le super admin ne peut pas être assigné à une équipe' });
+
+    let newPermissions = null;
+
+    if (teamId) {
+      const team = await prisma.adminTeam.findUnique({ where: { id: teamId } });
+      if (!team) return res.status(404).json({ error: 'Équipe introuvable' });
+      // Hérite des permissions de l'équipe
+      newPermissions = team.permissions || null;
+    }
+    // Si teamId est null : retrait de l'équipe → permissions effacées (accès total par défaut)
+
+    await prisma.user.update({
+      where: { id: req.params.id },
+      data: { adminTeamId: teamId || null, adminPermissions: newPermissions },
+    });
+    await writeAdminLog(req, 'ADMIN_TEAM_ASSIGN', 'user', req.params.id, { teamId: teamId || null });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/teams/presets — liste des équipes prédéfinies
+router.get('/teams/presets', requireSuperAdmin, (req, res) => {
+  res.json({ presets: Object.entries(TEAM_PRESETS).map(([key, p]) => ({ key, ...p })) });
+});
+
+// GET /api/admin/teams — liste des équipes
+router.get('/teams', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const teams = await prisma.adminTeam.findMany({ orderBy: { createdAt: 'asc' } });
+    const counts = await prisma.user.groupBy({
+      by: ['adminTeamId'],
+      where: { role: 'ADMIN', deletedAt: null, adminTeamId: { not: null } },
+      _count: { _all: true },
+    });
+    const countMap = Object.fromEntries(counts.map(c => [c.adminTeamId, c._count._all]));
+    res.json({ teams: teams.map(t => ({ ...t, memberCount: countMap[t.id] || 0 })) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/teams — créer une équipe
+router.post('/teams', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { name, description, color, preset, permissions } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Nom d\'équipe requis' });
+    if (preset && !TEAM_PRESETS[preset]) return res.status(400).json({ error: 'Preset invalide' });
+
+    const existing = await prisma.adminTeam.findUnique({ where: { name: name.trim() } });
+    if (existing) return res.status(409).json({ error: 'Une équipe avec ce nom existe déjà' });
+
+    // Résoudre les permissions : preset → permissions prédéfinies, custom → permissions manuelles
+    let resolvedPermissions = null;
+    if (preset && preset !== 'custom') {
+      resolvedPermissions = JSON.stringify(TEAM_PRESETS[preset].permissions);
+    } else if (permissions && Array.isArray(permissions)) {
+      resolvedPermissions = JSON.stringify(permissions);
+    }
+
+    const resolvedColor = color || (preset ? TEAM_PRESETS[preset].color : '#f4720b');
+
+    const team = await prisma.adminTeam.create({
+      data: {
+        name: name.trim(),
+        description: description?.trim() || (preset ? TEAM_PRESETS[preset].description : null),
+        color: resolvedColor,
+        permissions: resolvedPermissions,
+        preset: preset || 'custom',
+        createdBy: req.user.id,
+      },
+    });
+    await writeAdminLog(req, 'TEAM_CREATE', 'team', team.id, { name: team.name, preset });
+    res.status(201).json(team);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/teams/:id — modifier une équipe
+// Si les permissions changent, synchronise tous les membres
+router.patch('/teams/:id', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { name, description, color, permissions } = req.body;
+
+    const existing = await prisma.adminTeam.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Équipe introuvable' });
+
+    const updates = {
+      ...(name !== undefined        && { name: name.trim() }),
+      ...(description !== undefined && { description: description?.trim() || null }),
+      ...(color !== undefined       && { color: color || null }),
+    };
+
+    // Mise à jour des permissions et synchronisation des membres
+    if (permissions !== undefined) {
+      const newPerms = Array.isArray(permissions) ? JSON.stringify(permissions) : null;
+      updates.permissions = newPerms;
+      updates.preset = 'custom';
+      // Synchroniser tous les membres de cette équipe
+      await prisma.user.updateMany({
+        where: { adminTeamId: req.params.id, role: 'ADMIN' },
+        data: { adminPermissions: newPerms },
+      });
+    }
+
+    const updated = await prisma.adminTeam.update({ where: { id: req.params.id }, data: updates });
+    await writeAdminLog(req, 'TEAM_UPDATE', 'team', req.params.id, { changes: Object.keys(updates) });
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/admin/teams/:id — supprimer une équipe
+// Retire les membres et efface leurs permissions héritées
+router.delete('/teams/:id', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const team = await prisma.adminTeam.findUnique({ where: { id: req.params.id } });
+    if (!team) return res.status(404).json({ error: 'Équipe introuvable' });
+
+    // Retirer les membres et effacer les permissions héritées de l'équipe
+    await prisma.user.updateMany({
+      where: { adminTeamId: req.params.id, role: 'ADMIN' },
+      data: { adminTeamId: null, adminPermissions: null },
+    });
+    await prisma.adminTeam.delete({ where: { id: req.params.id } });
+    await writeAdminLog(req, 'TEAM_DELETE', 'team', req.params.id, { name: team.name });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -53,98 +619,149 @@ router.post('/create-admin', async (req, res, next) => {
 // GET /api/admin/dashboard
 router.get('/dashboard', async (req, res, next) => {
   try {
-    // Compteurs utilisateurs
-    const [totalUsers, totalPros, totalClients] = await Promise.all([
+    const now        = new Date();
+    const d7ago      = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000);
+    const d14ago     = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const d30ago     = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const d60ago     = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+
+    const [
+      // Totaux cumulés
+      totalUsers, totalPros, totalClients,
+      projectsOpen, projectsInProgress, projectsCompleted, projectsCancelled,
+      totalQuotes, totalPayments, revenueAgg,
+      activePremiumSubscriptions, pendingVerifications, activePromoCodes, totalPortfolioProjects,
+
+      // Deltas 7 jours courants
+      newUsers7,   newPros7,   newClients7,
+      newProjects7, newQuotes7,
+      revenue7Agg,
+
+      // Deltas 7 jours précédents (j-14 → j-7)
+      newUsers7prev,   newPros7prev,   newClients7prev,
+      newProjects7prev, newQuotes7prev,
+      revenue7prevAgg,
+
+      // Deltas 30 jours courants
+      newUsers30, newPros30, newClients30,
+      newProjects30, newQuotes30,
+      revenue30Agg,
+
+      // Deltas 30 jours précédents (j-60 → j-30)
+      newUsers30prev, newPros30prev, newClients30prev,
+      newProjects30prev, newQuotes30prev,
+      revenue30prevAgg,
+    ] = await Promise.all([
+      // Totaux
       prisma.user.count(),
       prisma.user.count({ where: { role: 'PROFESSIONAL' } }),
       prisma.user.count({ where: { role: 'CLIENT' } }),
-    ]);
-
-    // Projets par statut
-    const [projectsOpen, projectsInProgress, projectsCompleted, projectsCancelled] = await Promise.all([
       prisma.project.count({ where: { status: 'OPEN' } }),
       prisma.project.count({ where: { status: 'IN_PROGRESS' } }),
       prisma.project.count({ where: { status: 'COMPLETED' } }),
       prisma.project.count({ where: { status: 'CANCELLED' } }),
+      prisma.quote.count(),
+      prisma.payment.count({ where: { status: 'succeeded' } }),
+      prisma.payment.aggregate({ _sum: { amount: true }, where: { status: 'succeeded' } }),
+      prisma.subscription.count({ where: { status: 'ACTIVE' } }),
+      prisma.professional.count({ where: { identityStatus: 'PENDING' } }),
+      prisma.promoCode.count({ where: { active: true } }),
+      prisma.portfolioProject.count(),
+
+      // 7j courants
+      prisma.user.count({ where: { createdAt: { gte: d7ago } } }),
+      prisma.user.count({ where: { role: 'PROFESSIONAL', createdAt: { gte: d7ago } } }),
+      prisma.user.count({ where: { role: 'CLIENT', createdAt: { gte: d7ago } } }),
+      prisma.project.count({ where: { createdAt: { gte: d7ago } } }),
+      prisma.quote.count({ where: { createdAt: { gte: d7ago } } }),
+      prisma.payment.aggregate({ _sum: { amount: true }, where: { status: 'succeeded', createdAt: { gte: d7ago } } }),
+
+      // 7j précédents
+      prisma.user.count({ where: { createdAt: { gte: d14ago, lt: d7ago } } }),
+      prisma.user.count({ where: { role: 'PROFESSIONAL', createdAt: { gte: d14ago, lt: d7ago } } }),
+      prisma.user.count({ where: { role: 'CLIENT', createdAt: { gte: d14ago, lt: d7ago } } }),
+      prisma.project.count({ where: { createdAt: { gte: d14ago, lt: d7ago } } }),
+      prisma.quote.count({ where: { createdAt: { gte: d14ago, lt: d7ago } } }),
+      prisma.payment.aggregate({ _sum: { amount: true }, where: { status: 'succeeded', createdAt: { gte: d14ago, lt: d7ago } } }),
+
+      // 30j courants
+      prisma.user.count({ where: { createdAt: { gte: d30ago } } }),
+      prisma.user.count({ where: { role: 'PROFESSIONAL', createdAt: { gte: d30ago } } }),
+      prisma.user.count({ where: { role: 'CLIENT', createdAt: { gte: d30ago } } }),
+      prisma.project.count({ where: { createdAt: { gte: d30ago } } }),
+      prisma.quote.count({ where: { createdAt: { gte: d30ago } } }),
+      prisma.payment.aggregate({ _sum: { amount: true }, where: { status: 'succeeded', createdAt: { gte: d30ago } } }),
+
+      // 30j précédents
+      prisma.user.count({ where: { createdAt: { gte: d60ago, lt: d30ago } } }),
+      prisma.user.count({ where: { role: 'PROFESSIONAL', createdAt: { gte: d60ago, lt: d30ago } } }),
+      prisma.user.count({ where: { role: 'CLIENT', createdAt: { gte: d60ago, lt: d30ago } } }),
+      prisma.project.count({ where: { createdAt: { gte: d60ago, lt: d30ago } } }),
+      prisma.quote.count({ where: { createdAt: { gte: d60ago, lt: d30ago } } }),
+      prisma.payment.aggregate({ _sum: { amount: true }, where: { status: 'succeeded', createdAt: { gte: d60ago, lt: d30ago } } }),
     ]);
 
-    // Devis
-    const totalQuotes = await prisma.quote.count();
-
-    // Paiements et chiffre d'affaires
-    const [totalPayments, revenueAgg] = await Promise.all([
-      prisma.payment.count(),
-      prisma.payment.aggregate({
-        _sum: { amount: true },
-        where: { status: 'succeeded' },
-      }),
-    ]);
     const totalRevenue = revenueAgg._sum.amount || 0;
 
-    // Abonnements Premium actifs
-    const activePremiumSubscriptions = await prisma.subscription.count({
-      where: { status: 'ACTIVE' },
-    });
+    function delta(curr, prev) {
+      const diff = curr - prev;
+      const pct  = prev > 0 ? Math.round((diff / prev) * 100) : (curr > 0 ? 100 : 0);
+      return { curr, prev, diff, pct };
+    }
 
-    // Vérifications en attente
-    const pendingVerifications = await prisma.professional.count({
-      where: { identityStatus: 'PENDING' },
-    });
-
-    // Codes promo actifs
-    const activePromoCodes = await prisma.promoCode.count({
-      where: { active: true },
-    });
-
-    // Réalisations portfolio
-    const totalPortfolioProjects = await prisma.portfolioProject.count();
+    const rev7     = revenue7Agg._sum.amount     || 0;
+    const rev7prev = revenue7prevAgg._sum.amount  || 0;
+    const rev30    = revenue30Agg._sum.amount     || 0;
+    const rev30prev= revenue30prevAgg._sum.amount || 0;
 
     // 10 derniers utilisateurs inscrits
     const latestUsers = await prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
       take: 10,
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        city: true,
-        createdAt: true,
-      },
+      select: { id: true, email: true, firstName: true, lastName: true, role: true, city: true, createdAt: true },
     });
 
-    // 10 dernières activités (messages envoyés comme proxy d'activité)
+    // 10 dernières activités
     const latestActivities = await prisma.message.findMany({
       orderBy: { createdAt: 'desc' },
       take: 10,
       select: {
-        id: true,
-        senderId: true,
-        receiverId: true,
-        content: true,
-        createdAt: true,
+        id: true, senderId: true, receiverId: true, content: true, createdAt: true,
         sender: { select: { firstName: true, lastName: true, email: true } },
       },
     });
 
     res.json({
-      users: { total: totalUsers, professionals: totalPros, clients: totalClients },
+      users:    { total: totalUsers, professionals: totalPros, clients: totalClients },
       projects: {
-        open: projectsOpen,
-        inProgress: projectsInProgress,
-        completed: projectsCompleted,
-        cancelled: projectsCancelled,
+        open: projectsOpen, inProgress: projectsInProgress,
+        completed: projectsCompleted, cancelled: projectsCancelled,
         total: projectsOpen + projectsInProgress + projectsCompleted + projectsCancelled,
       },
-      quotes: { total: totalQuotes },
-      payments: { total: totalPayments, revenue: totalRevenue },
+      quotes:        { total: totalQuotes },
+      payments:      { total: totalPayments, revenue: totalRevenue },
       subscriptions: { activePremium: activePremiumSubscriptions },
-      promos: { active: activePromoCodes },
-      portfolio: { total: totalPortfolioProjects },
+      promos:        { active: activePromoCodes },
+      portfolio:     { total: totalPortfolioProjects },
       pendingVerifications,
       latestUsers,
       latestActivities,
+      delta7: {
+        users:    delta(newUsers7,    newUsers7prev),
+        pros:     delta(newPros7,     newPros7prev),
+        clients:  delta(newClients7,  newClients7prev),
+        projects: delta(newProjects7, newProjects7prev),
+        quotes:   delta(newQuotes7,   newQuotes7prev),
+        revenue:  delta(rev7,         rev7prev),
+      },
+      delta30: {
+        users:    delta(newUsers30,    newUsers30prev),
+        pros:     delta(newPros30,     newPros30prev),
+        clients:  delta(newClients30,  newClients30prev),
+        projects: delta(newProjects30, newProjects30prev),
+        quotes:   delta(newQuotes30,   newQuotes30prev),
+        revenue:  delta(rev30,         rev30prev),
+      },
     });
   } catch (err) {
     next(err);
@@ -159,9 +776,9 @@ router.get('/dashboard', async (req, res, next) => {
 router.get('/users', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit) || 20));
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 20));
     const skip = (page - 1) * limit;
-    const { search, role } = req.query;
+    const { search, role, dateFrom, dateTo } = req.query;
 
     const where = { deletedAt: null };
 
@@ -176,6 +793,12 @@ router.get('/users', async (req, res, next) => {
         { lastName: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
       ];
+    }
+
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+      if (dateTo)   where.createdAt.lte = new Date(dateTo + 'T23:59:59.999Z');
     }
 
     const [users, total] = await Promise.all([
@@ -210,6 +833,84 @@ router.get('/users', async (req, res, next) => {
         total,
         totalPages: Math.ceil(total / limit),
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/users-all — liste fusionnée clients + professionnels
+router.get('/users-all', async (req, res, next) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip  = (page - 1) * limit;
+    const { search, role, status, dateFrom, dateTo } = req.query;
+
+    const where = {
+      deletedAt: null,
+      role: { in: ['CLIENT', 'PROFESSIONAL'] },
+    };
+
+    if (role && ['CLIENT', 'PROFESSIONAL'].includes(role.toUpperCase())) {
+      where.role = role.toUpperCase();
+    }
+
+    if (status === 'suspended') where.suspended = true;
+    else if (status === 'active') where.suspended = false;
+
+    if (search) {
+      where.OR = [
+        { id: { startsWith: search } },
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search } },
+      ];
+    }
+
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+      if (dateTo)   where.createdAt.lte = new Date(dateTo + 'T23:59:59.999Z');
+    }
+
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          role: true,
+          avatarUrl: true,
+          city: true,
+          suspended: true,
+          emailVerified: true,
+          createdAt: true,
+          professional: {
+            select: {
+              id: true,
+              trade: true,
+              identityStatus: true,
+              averageRating: true,
+              reviewCount: true,
+              subscription: { select: { status: true } },
+            },
+          },
+        },
+      }),
+      prisma.user.count({ where }),
+    ]);
+
+    res.json({
+      users,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (err) {
     next(err);
@@ -288,12 +989,18 @@ router.get('/users/:id', async (req, res, next) => {
 // PATCH /api/admin/users/:id — modifier les infos de base
 router.patch('/users/:id', async (req, res, next) => {
   try {
-    // Le rôle ADMIN ne peut jamais être assigné via l'API — uniquement en base directement
+    // Ni le rôle ADMIN ni le niveau SUPER ne peuvent être assignés via l'API
     if (req.body.role === 'ADMIN') return res.status(403).json({ error: 'Promotion au rôle ADMIN interdite via l\'API' });
+    if (req.body.adminLevel) return res.status(403).json({ error: 'Modification du niveau admin interdite via l\'API' });
     const { firstName, lastName, email, city, phone } = req.body;
 
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+
+    // Interdit de modifier un compte admin via cette route générique
+    if (user.role === 'ADMIN') {
+      return res.status(403).json({ error: 'Modification d\'un compte admin interdite via cette route — utilisez /admins/:id/profile' });
+    }
 
     const updated = await prisma.user.update({
       where: { id: req.params.id },
@@ -319,11 +1026,17 @@ router.patch('/users/:id/suspend', async (req, res, next) => {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
 
+    // Interdit de suspendre un compte admin (DoS ciblé)
+    if (user.role === 'ADMIN') {
+      return res.status(403).json({ error: 'Impossible de suspendre un compte admin via cette route — utilisez /admins/:id/suspend' });
+    }
+
     const updated = await prisma.user.update({
       where: { id: req.params.id },
       data: { suspended: true },
     });
 
+    await writeAdminLog(req, 'USER_SUSPEND', 'User', req.params.id);
     const { passwordHash, ...userSafe } = updated;
     res.json({ message: 'Compte suspendu', user: userSafe });
   } catch (err) {
@@ -337,11 +1050,17 @@ router.patch('/users/:id/reactivate', async (req, res, next) => {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
 
+    // Interdit de réactiver un compte admin via cette route générique
+    if (user.role === 'ADMIN') {
+      return res.status(403).json({ error: 'Impossible de réactiver un compte admin via cette route — utilisez /admins/:id/reactivate' });
+    }
+
     const updated = await prisma.user.update({
       where: { id: req.params.id },
       data: { suspended: false },
     });
 
+    await writeAdminLog(req, 'USER_REACTIVATE', 'User', req.params.id);
     const { passwordHash, ...userSafe } = updated;
     res.json({ message: 'Compte réactivé', user: userSafe });
   } catch (err) {
@@ -364,6 +1083,7 @@ router.delete('/users/:id', async (req, res, next) => {
       data: { deletedAt: new Date(), suspended: true },
     });
 
+    await writeAdminLog(req, 'USER_DELETE', 'User', req.params.id, { role: user.role });
     res.json({ message: 'Compte supprimé (archivé)' });
   } catch (err) {
     next(err);
@@ -371,6 +1091,18 @@ router.delete('/users/:id', async (req, res, next) => {
 });
 
 // GET /api/admin/users/deleted — liste des comptes supprimés
+// GET /api/admin/users-deleted/stats — KPIs comptes supprimés (agrégats, sans rapatrier toutes les lignes)
+router.get('/users-deleted/stats', async (req, res, next) => {
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [total, restorable] = await Promise.all([
+      prisma.user.count({ where: { deletedAt: { not: null } } }),
+      prisma.user.count({ where: { deletedAt: { gte: thirtyDaysAgo } } }),
+    ]);
+    res.json({ total, restorable, old: total - restorable });
+  } catch (err) { next(err); }
+});
+
 router.get('/users-deleted', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -417,6 +1149,7 @@ router.patch('/users/:id/restore', async (req, res, next) => {
       data: { deletedAt: null, suspended: false },
     });
 
+    await writeAdminLog(req, 'USER_RESTORE', 'User', req.params.id);
     res.json({ message: 'Compte réactivé avec succès' });
   } catch (err) {
     next(err);
@@ -491,6 +1224,11 @@ router.post('/users/:id/reset-password', async (req, res, next) => {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
 
+    // Interdit de reset le mot de passe d'un compte admin (élévation de privilèges)
+    if (user.role === 'ADMIN') {
+      return res.status(403).json({ error: 'Impossible de réinitialiser le mot de passe d\'un compte admin' });
+    }
+
     // Générer un mot de passe temporaire
     const tempPassword = crypto.randomBytes(6).toString('hex'); // 12 caractères
     const passwordHash = await bcrypt.hash(tempPassword, 10);
@@ -500,10 +1238,11 @@ router.post('/users/:id/reset-password', async (req, res, next) => {
       data: { passwordHash },
     });
 
-    res.json({
-      message: 'Mot de passe réinitialisé',
-      temporaryPassword: tempPassword,
-    });
+    await writeAdminLog(req, 'USER_RESET_PASSWORD', 'User', req.params.id);
+
+    // Le mot de passe temporaire n'est jamais retourné dans la réponse HTTP
+    // À transmettre à l'utilisateur via email ou SMS hors-bande
+    res.json({ message: 'Mot de passe réinitialisé avec succès. Transmettez le nouveau mot de passe à l\'utilisateur via email ou SMS.' });
   } catch (err) {
     next(err);
   }
@@ -517,11 +1256,18 @@ router.post('/users/:id/reset-password', async (req, res, next) => {
 router.get('/professionals', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit) || 20));
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 20));
     const skip = (page - 1) * limit;
-    const { trade, city, identityStatus, premium, search } = req.query;
+    const { trade, city, identityStatus, premium, search, dateFrom, dateTo } = req.query;
 
     const where = { user: { deletedAt: null } };
+
+    if (dateFrom || dateTo) {
+      where.user = { ...where.user };
+      where.user.createdAt = {};
+      if (dateFrom) where.user.createdAt.gte = new Date(dateFrom);
+      if (dateTo)   where.user.createdAt.lte = new Date(dateTo + 'T23:59:59.999Z');
+    }
 
     if (search) {
       where.OR = [
@@ -672,6 +1418,7 @@ router.patch('/professionals/:id/verify', async (req, res, next) => {
       include: { user: { select: { firstName: true, lastName: true, email: true } } },
     });
 
+    await writeAdminLog(req, 'PRO_VERIFY', 'Professional', req.params.id);
     res.json({ message: 'Identité vérifiée', professional: updated });
   } catch (err) {
     next(err);
@@ -701,6 +1448,7 @@ router.patch('/professionals/:id/reject', async (req, res, next) => {
       { type: 'identity_rejected', reason: rejectionReason }
     );
 
+    await writeAdminLog(req, 'PRO_REJECT', 'Professional', req.params.id, { reason: rejectionReason });
     res.json({ message: 'Identité rejetée', professional: updated });
   } catch (err) {
     next(err);
@@ -904,6 +1652,30 @@ router.get('/projects', async (req, res, next) => {
   }
 });
 
+// GET /api/admin/projects/map — tous les projets géolocalisés (pour la carte)
+router.get('/projects/map', async (req, res, next) => {
+  try {
+    const { status } = req.query;
+    const where = { latitude: { not: null }, longitude: { not: null } };
+    if (status) where.status = status;
+
+    const projects = await prisma.project.findMany({
+      where,
+      select: {
+        id: true, title: true, city: true, latitude: true, longitude: true,
+        status: true, tradeNeeded: true, budgetMin: true, budgetMax: true,
+        createdAt: true,
+        client: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 2000,
+    });
+    res.json({ projects });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/admin/projects/:id — détail d'un projet
 router.get('/projects/:id', async (req, res, next) => {
   try {
@@ -967,7 +1739,7 @@ router.delete('/projects/:id', async (req, res, next) => {
 router.get('/payments', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(5000, Math.max(1, parseInt(req.query.limit) || 20));
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 20));
     const skip = (page - 1) * limit;
     const { status, dateFrom, dateTo, amountMin, amountMax, search, isDeposit } = req.query;
 
@@ -1077,12 +1849,178 @@ router.get('/payments/stats', async (req, res, next) => {
       revenueByMonth[key] = (revenueByMonth[key] || 0) + payment.amount;
     }
 
+    const [depositAgg, balanceAgg] = await Promise.all([
+      prisma.payment.aggregate({ _sum: { amount: true }, where: { status: 'succeeded', isDeposit: true } }),
+      prisma.payment.aggregate({ _sum: { amount: true }, where: { status: 'succeeded', isDeposit: false } }),
+    ]);
+
     res.json({
       totalRevenue: totalRevenueAgg._sum.amount || 0,
       totalSuccessfulPayments: totalRevenueAgg._count,
       failedPayments,
       revenueByMonth,
+      depositTotal: depositAgg._sum.amount || 0,
+      balanceTotal: balanceAgg._sum.amount || 0,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/payments/export-accounting — export comptable CSV SYSCOHADA (super admin)
+router.get('/payments/export-accounting', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { dateFrom, dateTo, status } = req.query;
+    const where = {};
+    if (status) where.status = status;
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+      if (dateTo)   where.createdAt.lte = new Date(dateTo + 'T23:59:59.999Z');
+    }
+
+    const payments = await prisma.payment.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      include: {
+        quote: {
+          select: {
+            id: true, amount: true,
+            project: { select: { title: true, city: true } },
+            professional: { select: { user: { select: { firstName: true, lastName: true } } } },
+          },
+        },
+      },
+      take: 10000,
+    });
+
+    const COMMISSION_RATE = await getConfig('commission_rate') || 0.08;
+
+    // En-têtes format comptable SYSCOHADA
+    const headers = [
+      'Date', 'N° Pièce', 'Journal', 'Code Journal',
+      'Compte Débit', 'Compte Crédit', 'Libellé',
+      'Montant HT (FCFA)', 'TVA (FCFA)', 'Montant TTC (FCFA)',
+      'Commission MANAWA (FCFA)', 'Net Pro (FCFA)',
+      'Réf. GeniusPay', 'Statut', 'Type', 'Rapproché',
+      'Réf. Bancaire', 'Rapproché le',
+    ];
+
+    const rows = payments.map((p, i) => {
+      const num = String(i + 1).padStart(5, '0');
+      const date = new Date(p.createdAt).toLocaleDateString('fr-FR');
+      const pro = p.quote?.professional?.user
+        ? p.quote.professional.user.firstName + ' ' + p.quote.professional.user.lastName
+        : '—';
+      const project = p.quote?.project?.title || '—';
+      const libelle = (p.isDeposit ? 'ACOMPTE 30% — ' : 'SOLDE 70% — ') + project + ' / ' + pro;
+      const isSuccess = p.status === 'succeeded';
+      const commission = isSuccess ? Math.round(p.amount * COMMISSION_RATE) : 0;
+      const netPro = isSuccess ? Math.round(p.amount - commission - (p.fees || 0)) : 0;
+      // Comptes SYSCOHADA : 4111 clients, 7071 prestations de services, 4431 TVA (exonéré BTP CI)
+      const debit  = isSuccess ? '5211' : '4713'; // Banque / Clients douteux
+      const credit = isSuccess ? '7071' : '4111'; // Prestations / Clients
+
+      return [
+        date,
+        'PAY-' + num,
+        p.isDeposit ? 'VTE-ACP' : 'VTE-SLD',
+        p.isDeposit ? 'AC' : 'SL',
+        debit,
+        credit,
+        libelle,
+        p.amount,
+        0,
+        p.amount,
+        commission,
+        netPro,
+        p.geniuspayRef || '',
+        p.status,
+        p.isDeposit ? 'Acompte 30%' : 'Solde 70%',
+        p.reconciledAt ? 'Oui' : 'Non',
+        p.bankRef || '',
+        p.reconciledAt ? new Date(p.reconciledAt).toLocaleDateString('fr-FR') : '',
+      ];
+    });
+
+    const csv = [headers, ...rows]
+      .map(r => r.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(','))
+      .join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="manawa_comptabilite_' + new Date().toISOString().slice(0,10) + '.csv"');
+    res.send('﻿' + csv); // BOM UTF-8 pour Excel
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/payments/reconciliation — liste des paiements à rapprocher / rapprochés
+router.get('/payments/reconciliation', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { reconciled, dateFrom, dateTo } = req.query;
+    const where = { status: 'succeeded' };
+    if (reconciled === 'true')  where.reconciledAt = { not: null };
+    if (reconciled === 'false') where.reconciledAt = null;
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+      if (dateTo)   where.createdAt.lte = new Date(dateTo + 'T23:59:59.999Z');
+    }
+
+    const [payments, total, totalAmount] = await Promise.all([
+      prisma.payment.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+        include: {
+          quote: {
+            select: {
+              project: { select: { title: true } },
+              professional: { select: { user: { select: { firstName: true, lastName: true } } } },
+            },
+          },
+        },
+      }),
+      prisma.payment.count({ where }),
+      prisma.payment.aggregate({ where, _sum: { amount: true } }),
+    ]);
+
+    res.json({ payments, total, totalAmount: totalAmount._sum.amount || 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/payments/:id/reconcile — marquer un paiement comme rapproché (super admin)
+router.patch('/payments/:id/reconcile', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { bankRef } = req.body;
+    const payment = await prisma.payment.findUnique({ where: { id: req.params.id } });
+    if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
+    if (payment.status !== 'succeeded') return res.status(400).json({ error: 'Seuls les paiements réussis peuvent être rapprochés' });
+    if (payment.reconciledAt) return res.status(409).json({ error: 'Ce paiement est déjà rapproché' });
+
+    await prisma.payment.update({
+      where: { id: req.params.id },
+      data: { reconciledAt: new Date(), reconciledBy: req.user.id, bankRef: bankRef || null },
+    });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/payments/:id/unreconcile — annuler le rapprochement (super admin)
+router.patch('/payments/:id/unreconcile', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const payment = await prisma.payment.findUnique({ where: { id: req.params.id } });
+    if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
+    await prisma.payment.update({
+      where: { id: req.params.id },
+      data: { reconciledAt: null, reconciledBy: null, bankRef: null },
+    });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -1217,53 +2155,82 @@ router.get('/audit-logs', async (req, res, next) => {
 // GET /api/admin/support/stats
 router.get('/support/stats', async (req, res, next) => {
   try {
-    const [total, open, inProgress, resolved, closed, byCategory] = await Promise.all([
+    const [total, open, inProgress, resolved, closed, byCategory, byPriority] = await Promise.all([
       prisma.supportTicket.count(),
       prisma.supportTicket.count({ where: { status: 'OPEN' } }),
       prisma.supportTicket.count({ where: { status: 'IN_PROGRESS' } }),
       prisma.supportTicket.count({ where: { status: 'RESOLVED' } }),
       prisma.supportTicket.count({ where: { status: 'CLOSED' } }),
       prisma.supportTicket.groupBy({ by: ['category'], _count: { _all: true } }),
+      prisma.supportTicket.groupBy({ by: ['priority'], _count: { _all: true } }),
     ]);
 
-    // Temps moyen de résolution : updatedAt - createdAt sur tickets résolus/fermés
+    // Temps moyen de résolution sur tickets résolus/fermés
     const doneTickets = await prisma.supportTicket.findMany({
       where: { status: { in: ['RESOLVED', 'CLOSED'] } },
-      select: { createdAt: true, updatedAt: true },
+      select: { createdAt: true, updatedAt: true, firstResponseAt: true, resolvedAt: true },
     });
+
     const avgResolutionHours = doneTickets.length
-      ? Math.round(
-          doneTickets.reduce((sum, t) => sum + (t.updatedAt - t.createdAt), 0)
-          / doneTickets.length / 3600000
-        )
+      ? Math.round(doneTickets.reduce((s, t) => s + (t.updatedAt - t.createdAt), 0) / doneTickets.length / 3600000)
       : null;
+
+    // Délai moyen de 1ère réponse (sur tickets qui ont firstResponseAt)
+    const withFirstResp = doneTickets.filter(t => t.firstResponseAt);
+    const avgFirstResponseHours = withFirstResp.length
+      ? Math.round(withFirstResp.reduce((s, t) => s + (t.firstResponseAt - t.createdAt), 0) / withFirstResp.length / 3600000 * 10) / 10
+      : null;
+
+    // Taux de résolution
+    const resolveRate = total > 0 ? Math.round((resolved + closed) / total * 100 * 10) / 10 : 0;
 
     res.json({
       total, open, inProgress, resolved, closed,
       avgResolutionHours,
+      avgFirstResponseHours,
+      resolveRate,
       byCategory: Object.fromEntries(byCategory.map(r => [r.category, r._count._all])),
+      byPriority: Object.fromEntries(byPriority.map(r => [r.priority, r._count._all])),
     });
   } catch (err) { next(err); }
 });
 
-// GET /api/admin/support/tickets — tous les tickets
+// GET /api/admin/support/tickets — tickets paginés avec recherche
 router.get('/support/tickets', async (req, res, next) => {
   try {
-    const { status, category } = req.query;
+    const { status, category, search } = req.query;
+    const page  = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip  = (page - 1) * limit;
+
     const where = {};
-    if (status) where.status = status;
+    if (status)   where.status   = status;
     if (category) where.category = category;
+    if (search) {
+      where.OR = [
+        { id:      { startsWith: search } },
+        { subject: { contains: search, mode: 'insensitive' } },
+        { user: { firstName: { contains: search, mode: 'insensitive' } } },
+        { user: { lastName:  { contains: search, mode: 'insensitive' } } },
+        { user: { email:     { contains: search, mode: 'insensitive' } } },
+      ];
+    }
 
-    const tickets = await prisma.supportTicket.findMany({
-      where,
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        user: { select: { id: true, firstName: true, lastName: true, email: true, role: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
-      },
-    });
+    const [tickets, total] = await Promise.all([
+      prisma.supportTicket.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        take: limit,
+        skip,
+        include: {
+          user:     { select: { id: true, firstName: true, lastName: true, email: true, role: true } },
+          messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+      }),
+      prisma.supportTicket.count({ where }),
+    ]);
 
-    res.json({ tickets });
+    res.json({ tickets, total, page, totalPages: Math.ceil(total / limit) });
   } catch (err) {
     next(err);
   }
@@ -1299,7 +2266,10 @@ router.post('/support/tickets/:id/reply', async (req, res, next) => {
       data: { ticketId: ticket.id, senderId: req.user.id, content: message, isAdmin: true },
     });
 
-    await prisma.supportTicket.update({ where: { id: ticket.id }, data: { status: 'IN_PROGRESS' } });
+    // Enregistrer firstResponseAt si c'est la 1ère réponse admin sur ce ticket
+    const updateData = { status: 'IN_PROGRESS' };
+    if (!ticket.firstResponseAt) updateData.firstResponseAt = new Date();
+    await prisma.supportTicket.update({ where: { id: ticket.id }, data: updateData });
 
     // Notifier l'utilisateur
     await sendPushNotification(
@@ -1323,9 +2293,12 @@ router.patch('/support/tickets/:id/status', async (req, res, next) => {
       return res.status(400).json({ error: 'Statut invalide' });
     }
 
+    const updateData = { status };
+    if (status === 'RESOLVED' || status === 'CLOSED') updateData.resolvedAt = new Date();
+
     const ticket = await prisma.supportTicket.update({
       where: { id: req.params.id },
-      data: { status },
+      data: updateData,
     });
 
     if (status === 'RESOLVED') {
@@ -1343,12 +2316,36 @@ router.patch('/support/tickets/:id/status', async (req, res, next) => {
   }
 });
 
+// PATCH /api/admin/support/tickets/:id/priority — changer la priorité
+router.patch('/support/tickets/:id/priority', async (req, res, next) => {
+  try {
+    const { priority } = req.body;
+    if (!['LOW', 'NORMAL', 'HIGH', 'URGENT'].includes(priority)) {
+      return res.status(400).json({ error: 'Priorité invalide. Valeurs : LOW | NORMAL | HIGH | URGENT' });
+    }
+    await prisma.supportTicket.update({ where: { id: req.params.id }, data: { priority } });
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/admin/support/tickets/:id/assign — assigner à un admin
+router.patch('/support/tickets/:id/assign', async (req, res, next) => {
+  try {
+    const { assignedTo } = req.body;
+    await prisma.supportTicket.update({
+      where: { id: req.params.id },
+      data: { assignedTo: assignedTo || null },
+    });
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
 // ══════════════════════════════════════════════════════════════
 // FINANCES & REVENUS
 // ══════════════════════════════════════════════════════════════
 
-// GET /api/admin/finances/summary — résumé financier global
-router.get('/finances/summary', async (req, res, next) => {
+// GET /api/admin/finances/summary — résumé financier global (super admin seulement)
+router.get('/finances/summary', requireSuperAdmin, async (req, res, next) => {
   try {
     const COMMISSION_RATE = await getConfig('commission_rate') || 0.08;
 
@@ -1418,8 +2415,8 @@ router.get('/finances/summary', async (req, res, next) => {
   }
 });
 
-// GET /api/admin/finances/commissions — commissions par professionnel (paginé)
-router.get('/finances/commissions', async (req, res, next) => {
+// GET /api/admin/finances/commissions — commissions par professionnel (super admin seulement)
+router.get('/finances/commissions', requireSuperAdmin, async (req, res, next) => {
   try {
     const COMMISSION_RATE = await getConfig('commission_rate') || 0.08;
     const { status, search, page = 1, limit = 20 } = req.query;
@@ -1508,8 +2505,8 @@ router.get('/finances/commissions', async (req, res, next) => {
   }
 });
 
-// PATCH /api/admin/finances/commissions/:professionalId/mark-paid — marquer toutes les commissions d'un pro comme payées
-router.patch('/finances/commissions/:professionalId/mark-paid', async (req, res, next) => {
+// PATCH /api/admin/finances/commissions/:professionalId/mark-paid — super admin seulement
+router.patch('/finances/commissions/:professionalId/mark-paid', requireSuperAdmin, async (req, res, next) => {
   try {
     const { professionalId } = req.params;
 
@@ -1535,6 +2532,7 @@ router.patch('/finances/commissions/:professionalId/mark-paid', async (req, res,
       data: { commissionPaid: true },
     });
 
+    const COMMISSION_RATE = await getConfig('commission_rate') || 0.08;
     const totalMarked = payments.reduce((s, p) => s + p.amount * COMMISSION_RATE, 0);
 
     res.json({ success: true, count: payments.length, totalMarked });
@@ -1543,8 +2541,8 @@ router.patch('/finances/commissions/:professionalId/mark-paid', async (req, res,
   }
 });
 
-// PATCH /api/admin/finances/payments/:paymentId/mark-paid — marquer une commission individuelle comme payée
-router.patch('/finances/payments/:paymentId/mark-paid', async (req, res, next) => {
+// PATCH /api/admin/finances/payments/:paymentId/mark-paid — super admin seulement
+router.patch('/finances/payments/:paymentId/mark-paid', requireSuperAdmin, async (req, res, next) => {
   try {
     const payment = await prisma.payment.findUnique({ where: { id: req.params.paymentId } });
     if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
@@ -1556,6 +2554,84 @@ router.patch('/finances/payments/:paymentId/mark-paid', async (req, res, next) =
     });
 
     res.json({ success: true, commissionPaid: updated.commissionPaid });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/payments/:id/refund — remboursement via GeniusPay (super admin)
+router.post('/payments/:id/refund', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { amount, reason, note } = req.body;
+    if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Montant de remboursement requis' });
+    if (!reason || !reason.trim()) return res.status(400).json({ error: 'Le motif est requis' });
+
+    const payment = await prisma.payment.findUnique({
+      where: { id: req.params.id },
+      include: { quote: { select: { project: { select: { title: true } } } } },
+    });
+    if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
+    if (payment.status !== 'succeeded') return res.status(400).json({ error: 'Seuls les paiements réussis peuvent être remboursés' });
+    if (payment.refundedAt) return res.status(409).json({ error: 'Ce paiement a déjà été remboursé' });
+    if (Number(amount) > payment.amount) return res.status(400).json({ error: 'Le montant ne peut pas dépasser le paiement original (' + payment.amount + ' FCFA)' });
+    if (!payment.geniuspayRef) return res.status(400).json({ error: 'Aucune référence GeniusPay — utilisez le remboursement manuel' });
+
+    let refundRef = null;
+    try {
+      const gpResult = await refundPayment(payment.geniuspayRef, Number(amount), reason.trim());
+      refundRef = gpResult?.reference || gpResult?.id || null;
+    } catch (gpErr) {
+      const errMsg = gpErr.response?.data?.message || gpErr.message;
+      return res.status(502).json({ error: 'GeniusPay : ' + errMsg });
+    }
+
+    const newStatus = Number(amount) >= payment.amount ? 'refunded' : 'partial_refund';
+
+    // Mise à jour atomique : updateMany avec condition refundedAt IS NULL
+    // Protège contre la race condition TOCTOU (double remboursement simultané)
+    const updated = await prisma.payment.updateMany({
+      where: { id: req.params.id, refundedAt: null },
+      data: { refundAmount: Number(amount), refundedAt: new Date(), refundRef, refundNote: note?.trim() || reason.trim(), status: newStatus },
+    });
+
+    if (updated.count === 0) {
+      return res.status(409).json({ error: 'Ce paiement vient d\'être remboursé en parallèle — opération annulée' });
+    }
+
+    await writeAdminLog(req, 'PAYMENT_REFUND', 'Payment', req.params.id, { amount: Number(amount), refundRef, mode: 'geniuspay' });
+    res.json({ success: true, refundRef, status: newStatus });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/payments/:id/refund-manual — remboursement manuel hors GeniusPay (super admin)
+router.post('/payments/:id/refund-manual', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { amount, reason, note } = req.body;
+    if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Montant requis' });
+    if (!reason || !reason.trim()) return res.status(400).json({ error: 'Le motif est requis' });
+
+    const payment = await prisma.payment.findUnique({ where: { id: req.params.id } });
+    if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
+    if (payment.refundedAt) return res.status(409).json({ error: 'Ce paiement a déjà été remboursé' });
+    if (Number(amount) > payment.amount) return res.status(400).json({ error: 'Montant supérieur au paiement original (' + payment.amount + ' FCFA)' });
+
+    const manualRef = 'MANUAL-' + req.user.id.substring(0, 8).toUpperCase();
+    const newStatus = Number(amount) >= payment.amount ? 'refunded' : 'partial_refund';
+
+    // Mise à jour atomique : updateMany avec condition refundedAt IS NULL
+    const updated = await prisma.payment.updateMany({
+      where: { id: req.params.id, refundedAt: null },
+      data: { refundAmount: Number(amount), refundedAt: new Date(), refundRef: manualRef, refundNote: note?.trim() || reason.trim(), status: newStatus },
+    });
+
+    if (updated.count === 0) {
+      return res.status(409).json({ error: 'Ce paiement vient d\'être remboursé en parallèle — opération annulée' });
+    }
+
+    await writeAdminLog(req, 'PAYMENT_REFUND_MANUAL', 'Payment', req.params.id, { amount: Number(amount), mode: 'manual' });
+    res.json({ success: true, refundRef: manualRef, status: newStatus });
   } catch (err) {
     next(err);
   }
@@ -1657,6 +2733,62 @@ router.get('/moderation/stats', async (req, res, next) => {
       total: pending + dismissed + removed,
       byType: Object.fromEntries(byType.map(b => [b.contentType, b._count._all])),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/moderation/reports/:id — détail d'un signalement
+router.get('/moderation/reports/:id', async (req, res, next) => {
+  try {
+    const r = await prisma.contentReport.findUnique({
+      where: { id: req.params.id },
+      include: { reporter: { select: { id: true, firstName: true, lastName: true, email: true } } },
+    });
+    if (!r) return res.status(404).json({ error: 'Signalement introuvable' });
+
+    let content = null;
+    try {
+      if (r.contentType === 'REVIEW') {
+        const rev = await prisma.review.findUnique({
+          where: { id: r.contentId },
+          include: {
+            author: { select: { firstName: true, lastName: true, email: true } },
+            professional: { include: { user: { select: { firstName: true, lastName: true } } } },
+          },
+        });
+        if (rev) content = {
+          text: rev.comment || '(sans commentaire)',
+          rating: rev.rating,
+          authorName: (rev.author.firstName || '') + ' ' + (rev.author.lastName || ''),
+          authorEmail: rev.author.email,
+          targetName: (rev.professional.user.firstName || '') + ' ' + (rev.professional.user.lastName || ''),
+        };
+      } else if (r.contentType === 'COMMENT') {
+        const com = await prisma.portfolioComment.findUnique({
+          where: { id: r.contentId },
+          include: { author: { select: { firstName: true, lastName: true, email: true } } },
+        });
+        if (com) content = {
+          text: com.content,
+          rating: com.rating,
+          authorName: (com.author.firstName || '') + ' ' + (com.author.lastName || ''),
+          authorEmail: com.author.email,
+        };
+      } else if (r.contentType === 'PORTFOLIO') {
+        const pp = await prisma.portfolioProject.findUnique({
+          where: { id: r.contentId },
+          include: { professional: { include: { user: { select: { firstName: true, lastName: true, email: true } } } } },
+        });
+        if (pp) content = {
+          text: pp.title + ' — ' + pp.description,
+          authorName: (pp.professional.user.firstName || '') + ' ' + (pp.professional.user.lastName || ''),
+          authorEmail: pp.professional.user.email,
+        };
+      }
+    } catch (_) {}
+
+    res.json({ ...r, content });
   } catch (err) {
     next(err);
   }
@@ -2075,7 +3207,7 @@ router.get('/security/activity', async (req, res, next) => {
         select: { id: true, resolvedBy: true, status: true, contentType: true, reason: true, resolvedAt: true },
       }),
       prisma.paymentAuditLog.findMany({
-        where: { triggeredBy: { not: 'system' }, triggeredBy: { not: null } },
+        where: { triggeredBy: { notIn: ['system', null] } },
         orderBy: { createdAt: 'desc' },
         take: Math.min(take, 20),
         select: { id: true, triggeredBy: true, fromStatus: true, toStatus: true, reason: true, createdAt: true, payment: { select: { amount: true } } },
@@ -2113,8 +3245,8 @@ router.get('/security/activity', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/admin/security/clean-otps — nettoyer les OTP expirés
-router.post('/security/clean-otps', async (req, res, next) => {
+// POST /api/admin/security/clean-otps — nettoyer les OTP expirés (super admin seulement : UPDATE sur toute la table)
+router.post('/security/clean-otps', requireSuperAdmin, async (req, res, next) => {
   try {
     const now = new Date();
     const [otpResult, resetResult] = await Promise.all([
@@ -2128,6 +3260,82 @@ router.post('/security/clean-otps', async (req, res, next) => {
       }),
     ]);
     res.json({ cleaned: otpResult.count + resetResult.count, otpCleaned: otpResult.count, resetCleaned: resetResult.count });
+  } catch (err) { next(err); }
+});
+
+// ──────────────────────────────────────────────────────────────
+// GESTION DES IPs AUTORISÉES POUR LE PANEL ADMIN
+// Stockées en AppConfig sous la clé "admin_allowed_ips" (JSON array de {ip, label, addedBy, addedAt})
+// ──────────────────────────────────────────────────────────────
+
+// GET /api/admin/security/allowed-ips — liste des IPs autorisées
+router.get('/security/allowed-ips', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const row = await prisma.appConfig.findUnique({ where: { key: 'admin_allowed_ips' } });
+    const ips = row ? JSON.parse(row.value) : [];
+    res.json({ ips });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/security/allowed-ips — ajouter une IP
+router.post('/security/allowed-ips', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const { ip, label } = req.body;
+    if (!ip || !ip.trim()) return res.status(400).json({ error: 'Adresse IP requise' });
+
+    const ipTrimmed = ip.trim();
+    // Validation basique IPv4 / IPv6
+    const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(ipTrimmed);
+    const ipv6 = /^[0-9a-fA-F:]{3,39}$/.test(ipTrimmed);
+    if (!ipv4 && !ipv6) return res.status(400).json({ error: 'Format d\'adresse IP invalide' });
+
+    const row = await prisma.appConfig.findUnique({ where: { key: 'admin_allowed_ips' } });
+    const ips = row ? JSON.parse(row.value) : [];
+
+    if (ips.some(e => e.ip === ipTrimmed)) {
+      return res.status(409).json({ error: 'Cette IP est déjà dans la liste' });
+    }
+
+    const newEntry = { ip: ipTrimmed, label: label?.trim() || '', addedBy: req.user.email, addedAt: new Date().toISOString() };
+    ips.push(newEntry);
+
+    await prisma.appConfig.upsert({
+      where: { key: 'admin_allowed_ips' },
+      create: { key: 'admin_allowed_ips', value: JSON.stringify(ips), description: 'IPs autorisées à accéder au panel admin' },
+      update: { value: JSON.stringify(ips), updatedBy: req.user.email },
+    });
+
+    await writeAdminLog(req, 'ADMIN_IP_ADD', 'AppConfig', 'admin_allowed_ips', { ip: ipTrimmed, label: label?.trim() || '' });
+    res.json({ success: true, entry: newEntry, ips });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/admin/security/allowed-ips/:ip — supprimer une IP
+router.delete('/security/allowed-ips/:ip', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const ipToRemove = decodeURIComponent(req.params.ip);
+
+    const row = await prisma.appConfig.findUnique({ where: { key: 'admin_allowed_ips' } });
+    if (!row) return res.status(404).json({ error: 'Aucune liste d\'IPs configurée' });
+
+    const ips = JSON.parse(row.value);
+    const filtered = ips.filter(e => e.ip !== ipToRemove);
+
+    if (filtered.length === ips.length) return res.status(404).json({ error: 'IP non trouvée dans la liste' });
+
+    // Empêcher de supprimer sa propre IP (risque de se bloquer)
+    const clientIP = (req.ip || '').replace(/^::ffff:/, '');
+    if (clientIP === ipToRemove) {
+      return res.status(403).json({ error: 'Impossible de supprimer votre propre IP — vous perdriez l\'accès' });
+    }
+
+    await prisma.appConfig.update({
+      where: { key: 'admin_allowed_ips' },
+      data: { value: JSON.stringify(filtered), updatedBy: req.user.email },
+    });
+
+    await writeAdminLog(req, 'ADMIN_IP_REMOVE', 'AppConfig', 'admin_allowed_ips', { ip: ipToRemove });
+    res.json({ success: true, ips: filtered });
   } catch (err) { next(err); }
 });
 
@@ -2417,8 +3625,8 @@ router.get('/subscriptions', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// PATCH /api/admin/subscriptions/:professionalId — activer / changer tier / annuler
-router.patch('/subscriptions/:professionalId', async (req, res, next) => {
+// PATCH /api/admin/subscriptions/:professionalId — activer / changer tier / annuler (super admin seulement)
+router.patch('/subscriptions/:professionalId', requireSuperAdmin, async (req, res, next) => {
   try {
     const { action, tier } = req.body;
     const proId = req.params.professionalId;
@@ -2699,8 +3907,8 @@ router.get('/communication/broadcasts', async (req, res, next) => {
   }
 });
 
-// POST /api/admin/communication/broadcast — envoyer une notification push
-router.post('/communication/broadcast', async (req, res, next) => {
+// POST /api/admin/communication/broadcast — envoyer une notification push (super admin seulement)
+router.post('/communication/broadcast', requireSuperAdmin, async (req, res, next) => {
   try {
     const { title, body, target, targetUserId } = req.body;
     if (!title || !body) return res.status(400).json({ error: 'Titre et corps requis' });
@@ -2942,8 +4150,8 @@ router.delete('/companies/:id/members/:memberId', async (req, res, next) => {
 // CONFIGURATION & PARAMÈTRES
 // ══════════════════════════════════════════════════════════════
 
-// GET /api/admin/config — lire tous les paramètres
-router.get('/config', async (req, res, next) => {
+// GET /api/admin/config — super admin seulement
+router.get('/config', requireSuperAdmin, async (req, res, next) => {
   try {
     const config = await getAllConfig();
     res.json(config);
@@ -2952,8 +4160,8 @@ router.get('/config', async (req, res, next) => {
   }
 });
 
-// PATCH /api/admin/config — mettre à jour un ou plusieurs paramètres
-router.patch('/config', async (req, res, next) => {
+// PATCH /api/admin/config — super admin seulement
+router.patch('/config', requireSuperAdmin, async (req, res, next) => {
   try {
     const { confirmPassword, ...updates } = req.body;
     if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {

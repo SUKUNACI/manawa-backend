@@ -52,16 +52,20 @@ const allowedOrigins = process.env.CORS_ORIGINS
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
-// Helmet avec CSP désactivé sur /admin (262 onclick + scripts externes)
-// Sur toutes les autres routes le CSP par défaut de Helmet reste actif
+// Helmet : CSP désactivé sur le panel admin (onclick inline + scripts CDN), X-Frame-Options=DENY partout
+const ADMIN_PANEL_PATH_EARLY = process.env.ADMIN_PANEL_PATH || '/admin';
 app.use((req, res, next) => {
-  if (req.path.startsWith('/admin')) {
+  if (req.path.startsWith(ADMIN_PANEL_PATH_EARLY) || req.path.startsWith('/admin')) {
     return helmet({
       contentSecurityPolicy: false,
+      frameguard: { action: 'deny' },
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     })(req, res, next);
   }
-  return helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } })(req, res, next);
+  return helmet({
+    frameguard: { action: 'deny' },
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })(req, res, next);
 });
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
@@ -97,7 +101,7 @@ app.use((req, res, next) => {
   if (req.originalUrl === '/api/payments/webhooks/geniuspay' || req.originalUrl === '/api/payments/notify' || req.originalUrl === '/api/subscriptions/notify') {
     return next();
   }
-  express.json({ limit: '10mb' })(req, res, next);
+  express.json({ limit: '1mb' })(req, res, next);
 });
 
 // Routes REST
@@ -127,25 +131,65 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/disputes', disputeRoutes);
 
-// Panel d'administration — seul login.html est public
-// Le dashboard (index.html, 400KB+) est servi uniquement après vérification du cookie httpOnly
-const adminPanelAuth = (req, res, next) => {
-  // Seule la page de login est publique
-  if (req.path === '/login.html' || req.path === '/login' || req.path === '/login.js' || req.path === '/dashboard.js') return next();
+// Panel d'administration
+const prismaForIPGuard = require('./config/db');
+const fs = require('fs');
+const adminPanelDir = require('path').join(__dirname, '../admin-panel');
 
-  // Toute autre requête (y compris /) requiert le cookie httpOnly posé au login
+// Cache-busting : hash MD5 de dashboard.js calculé au démarrage
+let dashboardHash = 'v1';
+try {
+  const content = fs.readFileSync(require('path').join(adminPanelDir, 'dashboard.js'));
+  dashboardHash = require('crypto').createHash('md5').update(content).digest('hex').slice(0, 8);
+} catch {}
+
+// Restriction IP : lit la liste en DB (AppConfig key=admin_allowed_ips)
+const adminIPGuard = async (req, res, next) => {
+  try {
+    const row = await prismaForIPGuard.appConfig.findUnique({ where: { key: 'admin_allowed_ips' } });
+    let allowedIPs = [];
+    if (row) { try { allowedIPs = JSON.parse(row.value).map(e => e.ip); } catch {} }
+    if (allowedIPs.length === 0) return next();
+    const clientIP = (req.ip || '').replace(/^::ffff:/, '').replace(/^::1$/, '127.0.0.1');
+    if (allowedIPs.includes(clientIP)) return next();
+    console.warn(`[AdminPanel] IP refusée : ${clientIP}`);
+    return res.status(403).send('Accès interdit');
+  } catch { return res.status(503).send('Accès temporairement indisponible'); }
+};
+
+// Auth cookie : login.html, login.js et les assets statiques (.js/.css) sont publics
+const adminPanelAuth = (req, res, next) => {
+  if (req.path === '/login.html' || req.path === '/login.js') return next();
+  if (req.path.match(/\.(js|css|png|jpg|ico|svg|woff2?)(\?.*)?$/)) return next();
   const token = req.cookies?.adminToken;
   if (!token) return res.redirect('/admin/login.html');
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     if (decoded.role !== 'ADMIN') return res.redirect('/admin/login.html');
     next();
-  } catch {
-    return res.redirect('/admin/login.html');
-  }
+  } catch { return res.redirect('/admin/login.html'); }
 };
 
-app.use('/admin', adminPanelAuth, express.static(require('path').join(__dirname, '../admin-panel')));
+// Servir index.html avec hash injecté et Cache-Control no-store
+app.use('/admin', adminIPGuard, adminPanelAuth, (req, res, next) => {
+  if (req.path !== '/' && req.path !== '/index.html') return next();
+  try {
+    let html = fs.readFileSync(require('path').join(adminPanelDir, 'index.html'), 'utf8');
+    html = html.replace(/dashboard\.js(\?v=[^"']*)?/g, 'dashboard.js?v=' + dashboardHash);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(html);
+  } catch { return next(); }
+});
+
+app.use('/admin', adminIPGuard, adminPanelAuth, express.static(adminPanelDir, {
+  setHeaders: (res, filePath) => {
+    // Forcer no-store sur dashboard.js et index.html — jamais de cache navigateur
+    if (filePath.endsWith('dashboard.js') || filePath.endsWith('index.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    }
+  }
+}));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
@@ -343,7 +387,11 @@ setTimeout(() => {
   setInterval(reconcilePendingPayments, 60 * 60 * 1000);
 }, 30 * 60 * 1000);
 
+const { seedConfig, ensureSuperAdmin } = require('./utils/appConfig');
+
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`Serveur MANAWA démarré sur le port ${PORT}`);
+  seedConfig().catch(err => console.error('[Config] Erreur seed:', err.message));
+  ensureSuperAdmin().catch(err => console.error('[Boot] Erreur ensureSuperAdmin:', err.message));
 });

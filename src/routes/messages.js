@@ -21,6 +21,60 @@ router.post('/', requireAuth, messageLimiter, async (req, res, next) => {
     if (!receiverId || !content || !content.trim()) {
       return res.status(400).json({ error: 'receiverId et content sont requis' });
     }
+
+    // Vérifier que le destinataire existe et n'est pas suspendu
+    const receiver = await prisma.user.findUnique({
+      where: { id: receiverId },
+      select: { id: true, suspended: true, role: true },
+    });
+    if (!receiver) return res.status(404).json({ error: 'Destinataire introuvable' });
+    if (receiver.suspended) return res.status(403).json({ error: 'Ce compte est suspendu' });
+
+    // Un utilisateur ne peut envoyer un message qu'à quelqu'un avec qui il a une relation :
+    // CLIENT → PROFESSIONAL : doit avoir un projet en commun (devis soumis ou accepté)
+    // PROFESSIONAL → CLIENT : idem
+    // Tout autre combinaison (CLIENT→CLIENT, etc.) est refusée
+    const senderId = req.user.id;
+    const senderRole = req.user.role;
+    const receiverRole = receiver.role;
+
+    if (senderRole !== 'ADMIN' && receiverRole !== 'ADMIN') {
+      // Vérifier une relation via devis ou projet
+      const clientId   = senderRole === 'CLIENT' ? senderId : receiverId;
+      const proUserId  = senderRole === 'PROFESSIONAL' ? senderId : receiverId;
+
+      if ((senderRole === 'CLIENT' && receiverRole !== 'PROFESSIONAL') ||
+          (senderRole === 'PROFESSIONAL' && receiverRole !== 'CLIENT')) {
+        return res.status(403).json({ error: 'Messagerie réservée aux échanges client-professionnel' });
+      }
+
+      const pro = await prisma.professional.findUnique({ where: { userId: proUserId }, select: { id: true } });
+      if (!pro) return res.status(403).json({ error: 'Aucune relation avec ce professionnel' });
+
+      const hasRelation = await prisma.quote.findFirst({
+        where: {
+          professionalId: pro.id,
+          project: { clientId },
+        },
+        select: { id: true },
+      });
+
+      // Autoriser aussi si une conversation existe déjà (pour les suites d'échanges)
+      const existingConversation = await prisma.message.findFirst({
+        where: {
+          OR: [
+            { senderId, receiverId },
+            { senderId: receiverId, receiverId: senderId },
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (!hasRelation && !existingConversation) {
+        return res.status(403).json({ error: 'Vous ne pouvez contacter ce professionnel qu\'après avoir soumis un projet' });
+      }
+    }
+
     const message = await prisma.message.create({
       data: { senderId: req.user.id, receiverId, content: content.trim() },
     });

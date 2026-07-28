@@ -58,11 +58,19 @@ router.get('/', requireAuth, async (req, res, next) => {
     const limit = Math.min(50, parseInt(req.query.limit) || 20);
     const tradesArray = trades ? trades.split(',') : undefined;
 
+    // Les clients ne voient que les projets OPEN sur la marketplace (pas les leurs ni ceux en cours)
+    // Les pros voient les projets OPEN pour soumettre des devis
+    const allowedStatus = 'OPEN';
     const where = {
       tradeNeeded: tradesArray ? { in: tradesArray } : trade || undefined,
       city: city || undefined,
-      status: status || 'OPEN',
+      status: allowedStatus,
     };
+
+    // Un CLIENT ne voit pas ses propres projets dans la marketplace (il utilise /mine pour ça)
+    if (req.user.role === 'CLIENT') {
+      where.clientId = { not: req.user.id };
+    }
 
     if (req.user.role === 'PROFESSIONAL') {
       const pro = await prisma.professional.findUnique({ where: { userId: req.user.id }, include: { subscription: true } });
@@ -109,7 +117,7 @@ router.get('/mine', requireAuth, requireRole('CLIENT'), async (req, res, next) =
   try {
     const projects = await prisma.project.findMany({
       where: { clientId: req.user.id },
-      include: { photos: true, quotes: { include: { professional: { include: { user: true } } } } },
+      include: { photos: true, quotes: { include: { professional: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, avatarUrl: true, city: true } } } } } } },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });

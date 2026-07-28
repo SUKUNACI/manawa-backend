@@ -15,6 +15,7 @@ let dashboardData = null;
 const titles = {
   dashboard: 'Tableau de bord',
   'verif-id': 'Vérifications d\'identité',
+  'users-all': 'Tous les utilisateurs',
   professionals: 'Professionnels',
   clients: 'Clients',
   projects: 'Projets',
@@ -38,7 +39,9 @@ const titles = {
   settings: 'Configuration & Paramètres',
   support: 'Support',
   deleted: 'Comptes supprimés',
+  'admin-team': 'Équipe administrateurs',
   'create-admin': 'Créer un administrateur',
+  'admin-logs': 'Journal d\'actions admin',
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -59,18 +62,27 @@ function logout() {
     credentials: 'include',
     body: JSON.stringify({}),
   }).catch(() => {});
-  window.location.href = '/admin/login.html';
+  window.location.href = window.location.pathname.replace(/\/[^/]*$/, '') + '/login.html';
 }
 
 
 // ══════════════════════════════════════════════════════════════
 // API HELPER
 // ══════════════════════════════════════════════════════════════
+function getCsrfToken() {
+  const match = document.cookie.match(/(?:^|;\s*)adminCsrf=([^;]+)/);
+  return match ? match[1] : '';
+}
+
 async function apiCall(endpoint, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {}),
   };
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    headers['X-CSRF-Token'] = getCsrfToken();
+  }
 
   const res = await fetch(API_BASE + endpoint, { ...options, headers, credentials: 'include' });
 
@@ -88,10 +100,25 @@ async function apiCall(endpoint, options = {}) {
   return res.json();
 }
 
+// Renouvelle le cookie adminToken toutes les 10 min pour éviter l'expiration à 15 min
+setInterval(() => {
+  fetch(API_BASE + '/auth/admin-renew', { method: 'POST', credentials: 'include' })
+    .catch(() => {});
+}, 10 * 60 * 1000);
+
 // ══════════════════════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════════════════════
+// Sections toujours accessibles sans restriction de permissions
+const FREE_SECTIONS = new Set(['dashboard', 'admin-team', 'create-admin', 'admin-logs']);
+
 function showPage(id, el) {
+  // Vérifier les permissions granulaires avant de naviguer
+  if (window._adminAllowedSections && !FREE_SECTIONS.has(id) && !window._adminAllowedSections.includes(id)) {
+    showToast('Accès non autorisé à cette section', true);
+    return;
+  }
+
   currentPage = id;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');
@@ -109,6 +136,7 @@ function showPage(id, el) {
   switch (id) {
     case 'dashboard': loadDashboard(); break;
     case 'verif-id': loadVerifications(); break;
+    case 'users-all': loadUsersAll(1); break;
     case 'professionals': loadProfessionals(1); break;
     case 'clients': loadClients(1); break;
     case 'projects': loadProjects(1); break;
@@ -132,7 +160,9 @@ function showPage(id, el) {
     case 'settings': loadSettings(); break;
     case 'support': loadSupportStats(); loadSupportTickets(); break;
     case 'deleted': loadDeletedUsers(1); break;
+    case 'admin-team': loadAdminTeam(); break;
     case 'create-admin': resetCreateAdminForm(); break;
+    case 'admin-logs': loadAdminLogs(1); break;
   }
 
   // Bouton Export CSV — visible sur pros, clients, paiements, finances
@@ -319,6 +349,152 @@ async function exportCurrentPage() {
 // ══════════════════════════════════════════════════════════════
 // DASHBOARD
 // ══════════════════════════════════════════════════════════════
+let dashPeriod = 7;
+
+function setDashPeriod(p) {
+  dashPeriod = p;
+  document.getElementById('dash-period-7').style.background  = p === 7  ? 'rgba(244,114,11,0.15)' : '';
+  document.getElementById('dash-period-7').style.color       = p === 7  ? 'var(--orange)' : '';
+  document.getElementById('dash-period-7').style.borderColor = p === 7  ? 'rgba(244,114,11,0.3)' : '';
+  document.getElementById('dash-period-30').style.background  = p === 30 ? 'rgba(244,114,11,0.15)' : '';
+  document.getElementById('dash-period-30').style.color       = p === 30 ? 'var(--orange)' : '';
+  document.getElementById('dash-period-30').style.borderColor = p === 30 ? 'rgba(244,114,11,0.3)' : '';
+  if (dashboardData) renderDashboardDeltas(dashboardData);
+}
+
+function renderDelta(elId, d) {
+  const el = document.getElementById(elId);
+  if (!el || !d) return;
+  const sign  = d.diff >= 0 ? '+' : '';
+  const arrow = d.diff >= 0 ? '▲' : '▼';
+  const cls   = d.diff >= 0 ? 'up' : 'warn';
+  const label = dashPeriod === 7 ? '7 j' : '30 j';
+  el.className = 'kpi-delta ' + cls;
+  el.textContent = arrow + ' ' + sign + d.diff + ' (' + (d.diff >= 0 ? '+' : '') + d.pct + '%) vs ' + label + ' préc.';
+}
+
+function renderDashboardDeltas(data) {
+  const d = dashPeriod === 7 ? data.delta7 : data.delta30;
+  if (!d) return;
+  renderDelta('kpi-pros-delta',     d.pros);
+  renderDelta('kpi-clients-delta',  d.clients);
+  renderDelta('kpi-projects-delta', d.projects);
+  renderDelta('kpi-revenue-delta',  d.revenue);
+  renderDelta('kpi-quotes-delta',   d.quotes);
+}
+
+function exportDashboardCSV() {
+  if (!dashboardData) { showToast('Données non chargées', true); return; }
+  const d  = dashboardData;
+  const d7 = d.delta7  || {};
+  const d30= d.delta30 || {};
+  const rows = [
+    ['Métrique', 'Total', 'Nouveaux 7j', 'vs 7j préc. (%)', 'Nouveaux 30j', 'vs 30j préc. (%)'],
+    ['Professionnels', d.users.professionals, d7.pros?.curr, d7.pros?.pct, d30.pros?.curr, d30.pros?.pct],
+    ['Clients',        d.users.clients,       d7.clients?.curr, d7.clients?.pct, d30.clients?.curr, d30.clients?.pct],
+    ['Projets',        d.projects.total,      d7.projects?.curr, d7.projects?.pct, d30.projects?.curr, d30.projects?.pct],
+    ['Devis',          d.quotes.total,        d7.quotes?.curr, d7.quotes?.pct, d30.quotes?.curr, d30.quotes?.pct],
+    ['CA (FCFA)',       d.payments.revenue,    d7.revenue?.curr, d7.revenue?.pct, d30.revenue?.curr, d30.revenue?.pct],
+    ['Premium actifs', d.subscriptions.activePremium, '--', '--', '--', '--'],
+    ['Codes promo actifs', d.promos?.active, '--', '--', '--', '--'],
+  ];
+  const csv = rows.map(r => r.map(v => '"' + String(v ?? '').replace(/"/g,'""') + '"').join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  a.download = 'dashboard_manawa_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click(); URL.revokeObjectURL(url);
+  showToast('Export CSV téléchargé');
+}
+
+function exportDashboardPDF() {
+  if (!dashboardData) { showToast('Données non chargées', true); return; }
+  const d   = dashboardData;
+  const d7  = d.delta7  || {};
+  const d30 = d.delta30 || {};
+  const date = new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  const html = `
+    <!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Dashboard MANAWA — ${date}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:32px;color:#1a1a2e;max-width:900px;margin:0 auto;}
+      h1{color:#F4720B;font-size:24px;margin-bottom:4px;}
+      .subtitle{color:#6B7280;font-size:13px;margin-bottom:28px;}
+      h2{font-size:15px;color:#1a1a2e;border-bottom:2px solid #F4720B;padding-bottom:6px;margin-top:28px;}
+      table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;}
+      th{background:#F4720B;color:#fff;padding:8px 12px;text-align:left;}
+      td{padding:8px 12px;border-bottom:1px solid #E5E7EB;}
+      tr:nth-child(even) td{background:#F9FAFB;}
+      .up{color:#16a34a;font-weight:600;}
+      .down{color:#dc2626;font-weight:600;}
+      .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px;}
+      .kpi{background:#F8F9FA;border:1px solid #E5E7EB;border-radius:12px;padding:16px;text-align:center;}
+      .kpi-val{font-size:22px;font-weight:800;color:#F4720B;}
+      .kpi-label{font-size:11px;color:#6B7280;margin-top:4px;}
+    </style></head><body>
+    <h1>📊 Tableau de bord MANAWA</h1>
+    <div class="subtitle">Généré le ${date} · Plateforme BTP Côte d'Ivoire</div>
+
+    <h2>KPIs cumulés</h2>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-val">${formatNumber(d.users.professionals)}</div><div class="kpi-label">Professionnels</div></div>
+      <div class="kpi"><div class="kpi-val">${formatNumber(d.users.clients)}</div><div class="kpi-label">Clients</div></div>
+      <div class="kpi"><div class="kpi-val">${formatNumber(d.projects.total)}</div><div class="kpi-label">Projets</div></div>
+      <div class="kpi"><div class="kpi-val">${formatCurrency(d.payments.revenue)}</div><div class="kpi-label">CA FCFA</div></div>
+      <div class="kpi"><div class="kpi-val">${formatNumber(d.quotes.total)}</div><div class="kpi-label">Devis</div></div>
+      <div class="kpi"><div class="kpi-val">${formatNumber(d.subscriptions.activePremium)}</div><div class="kpi-label">Premium actifs</div></div>
+      <div class="kpi"><div class="kpi-val">${formatNumber(d.projects.open)}</div><div class="kpi-label">Projets ouverts</div></div>
+      <div class="kpi"><div class="kpi-val">${formatNumber(d.payments.total)}</div><div class="kpi-label">Paiements réussis</div></div>
+    </div>
+
+    <h2>Évolution — 7 derniers jours vs 7 jours précédents</h2>
+    <table>
+      <thead><tr><th>Métrique</th><th>Cette semaine</th><th>Semaine préc.</th><th>Variation</th></tr></thead>
+      <tbody>
+        ${[
+          ['Nouveaux professionnels', d7.pros],
+          ['Nouveaux clients',        d7.clients],
+          ['Nouveaux projets',        d7.projects],
+          ['Nouveaux devis',          d7.quotes],
+          ['CA encaissé (FCFA)',      d7.revenue],
+        ].map(([label, dt]) => `<tr>
+          <td>${label}</td>
+          <td><strong>${formatNumber(dt?.curr ?? 0)}</strong></td>
+          <td>${formatNumber(dt?.prev ?? 0)}</td>
+          <td class="${(dt?.diff ?? 0) >= 0 ? 'up' : 'down'}">${(dt?.diff ?? 0) >= 0 ? '▲' : '▼'} ${(dt?.diff ?? 0) >= 0 ? '+' : ''}${dt?.diff ?? 0} (${(dt?.diff ?? 0) >= 0 ? '+' : ''}${dt?.pct ?? 0}%)</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+
+    <h2>Évolution — 30 derniers jours vs 30 jours précédents</h2>
+    <table>
+      <thead><tr><th>Métrique</th><th>Ce mois</th><th>Mois préc.</th><th>Variation</th></tr></thead>
+      <tbody>
+        ${[
+          ['Nouveaux professionnels', d30.pros],
+          ['Nouveaux clients',        d30.clients],
+          ['Nouveaux projets',        d30.projects],
+          ['Nouveaux devis',          d30.quotes],
+          ['CA encaissé (FCFA)',      d30.revenue],
+        ].map(([label, dt]) => `<tr>
+          <td>${label}</td>
+          <td><strong>${formatNumber(dt?.curr ?? 0)}</strong></td>
+          <td>${formatNumber(dt?.prev ?? 0)}</td>
+          <td class="${(dt?.diff ?? 0) >= 0 ? 'up' : 'down'}">${(dt?.diff ?? 0) >= 0 ? '▲' : '▼'} ${(dt?.diff ?? 0) >= 0 ? '+' : ''}${dt?.diff ?? 0} (${(dt?.diff ?? 0) >= 0 ? '+' : ''}${dt?.pct ?? 0}%)</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+
+    <p style="margin-top:32px;font-size:11px;color:#9CA3AF;text-align:center;">Rapport MANAWA — Confidentiel · ${date}</p>
+    </body></html>`;
+
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+  win.onload = () => { win.print(); };
+}
+
 async function loadDashboard() {
   try {
     const data = await apiCall('/admin/dashboard');
@@ -414,6 +590,10 @@ async function loadDashboard() {
     } else {
       tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px;">Aucune inscription récente</td></tr>';
     }
+
+    // Deltas période (initialise sur 7j)
+    setDashPeriod(dashPeriod);
+
   } catch (err) {
     if (err.message !== 'Unauthorized') {
       void err;
@@ -565,10 +745,15 @@ async function loadProfessionals(page) {
   const trade = document.getElementById('pros-trade-filter').value;
   const status = document.getElementById('pros-status-filter').value;
 
+  const dateFrom = document.getElementById('pros-date-from').value;
+  const dateTo   = document.getElementById('pros-date-to').value;
+
   let url = '/admin/professionals?page=' + page + '&limit=15';
-  if (trade) url += '&trade=' + encodeURIComponent(trade);
-  if (status) url += '&identityStatus=' + encodeURIComponent(status);
-  if (search) url += '&search=' + encodeURIComponent(search);
+  if (trade)    url += '&trade=' + encodeURIComponent(trade);
+  if (status)   url += '&identityStatus=' + encodeURIComponent(status);
+  if (search)   url += '&search=' + encodeURIComponent(search);
+  if (dateFrom) url += '&dateFrom=' + encodeURIComponent(dateFrom);
+  if (dateTo)   url += '&dateTo=' + encodeURIComponent(dateTo);
 
   try {
     const data = await apiCall(url);
@@ -910,8 +1095,13 @@ async function loadClients(page) {
   clientsCurrentPage = page;
   const search = document.getElementById('clients-search').value.trim();
 
+  const dateFrom = document.getElementById('clients-date-from').value;
+  const dateTo   = document.getElementById('clients-date-to').value;
+
   let url = '/admin/users?role=CLIENT&page=' + page + '&limit=15';
-  if (search) url += '&search=' + encodeURIComponent(search);
+  if (search)   url += '&search=' + encodeURIComponent(search);
+  if (dateFrom) url += '&dateFrom=' + encodeURIComponent(dateFrom);
+  if (dateTo)   url += '&dateTo=' + encodeURIComponent(dateTo);
 
   try {
     const data = await apiCall(url);
@@ -966,6 +1156,110 @@ async function loadClients(page) {
     if (err.message !== 'Unauthorized') {
       void err;
     }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// TOUS LES UTILISATEURS (vue fusionnée clients + pros)
+// ══════════════════════════════════════════════════════════════
+let allUsersCurrentPage = 1;
+let allUsersDebounceTimer = null;
+
+function debounceAllUsers() {
+  clearTimeout(allUsersDebounceTimer);
+  allUsersDebounceTimer = setTimeout(() => loadUsersAll(1), 350);
+}
+
+async function loadUsersAll(page) {
+  allUsersCurrentPage = page;
+  const search   = document.getElementById('all-search').value.trim();
+  const role     = document.getElementById('all-role-filter').value;
+  const status   = document.getElementById('all-status-filter').value;
+  const dateFrom = document.getElementById('all-date-from').value;
+  const dateTo   = document.getElementById('all-date-to').value;
+
+  let url = '/admin/users-all?page=' + page + '&limit=20';
+  if (search)   url += '&search='   + encodeURIComponent(search);
+  if (role)     url += '&role='     + encodeURIComponent(role);
+  if (status)   url += '&status='   + encodeURIComponent(status);
+  if (dateFrom) url += '&dateFrom=' + encodeURIComponent(dateFrom);
+  if (dateTo)   url += '&dateTo='   + encodeURIComponent(dateTo);
+
+  try {
+    const data = await apiCall(url);
+    const tbody      = document.getElementById('all-users-tbody');
+    const emptyEl    = document.getElementById('all-users-empty');
+    const pagEl      = document.getElementById('all-users-pagination');
+
+    if (!data.users || data.users.length === 0) {
+      tbody.innerHTML = '';
+      emptyEl.style.display = 'block';
+      pagEl.style.display   = 'none';
+      return;
+    }
+
+    emptyEl.style.display = 'none';
+    tbody.innerHTML = data.users.map(u => {
+      const name = ((u.firstName || '') + ' ' + (u.lastName || '')).trim();
+      const isPro = u.role === 'PROFESSIONAL';
+      const pro   = u.professional;
+
+      const roleBadge = isPro
+        ? '<span class="badge badge-orange">🔨 Pro</span>'
+        : '<span class="badge badge-blue">👤 Client</span>';
+
+      const detailHtml = isPro && pro
+        ? escHtml(pro.trade || '—') + (pro.averageRating ? ' · ★' + pro.averageRating.toFixed(1) : '')
+        : '<span style="color:var(--muted);font-size:11px;">—</span>';
+
+      const idBadge = isPro && pro
+        ? getStatusBadge(pro.identityStatus)
+        : (u.emailVerified ? '<span class="badge badge-green">Email vérifié</span>' : '<span class="badge badge-muted">Non vérifié</span>');
+
+      const statusBadge = u.suspended
+        ? '<span class="badge badge-red">Suspendu</span>'
+        : '<span class="badge badge-green">Actif</span>';
+
+      const clickFn = isPro && pro
+        ? 'viewProfessional(\'' + escAttr(pro.id) + '\')'
+        : 'openClientModal(\'' + escAttr(u.id) + '\')';
+
+      const suspendFn = isPro && pro
+        ? 'suspendPro(\'' + escAttr(pro.id) + '\',\'' + escAttr(name) + '\')'
+        : 'suspendUser(\'' + escAttr(u.id) + '\',\'' + escAttr(name) + '\')';
+      const reactivateFn = isPro && pro
+        ? 'reactivatePro(\'' + escAttr(pro.id) + '\',\'' + escAttr(name) + '\')'
+        : 'reactivateUser(\'' + escAttr(u.id) + '\',\'' + escAttr(name) + '\')';
+
+      const actionBtns = (u.suspended
+        ? '<button class="btn btn-approve" onclick="event.stopPropagation();' + reactivateFn + '" title="Réactiver">↺</button>'
+        : '<button class="btn btn-reject" onclick="event.stopPropagation();' + suspendFn + '" title="Suspendre">⏸</button>')
+        + '<button class="btn btn-view" onclick="event.stopPropagation();' + clickFn + '" title="Voir">👁</button>';
+
+      return '<tr style="cursor:pointer;" onclick="' + clickFn + '">'
+        + '<td><span style="font-family:monospace;font-size:11px;color:var(--orange);">' + escHtml(u.id.substring(0,6)) + '</span></td>'
+        + '<td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + '</span></td>'
+        + '<td>' + roleBadge + '</td>'
+        + '<td>' + escHtml(u.city || '—') + '</td>'
+        + '<td>' + detailHtml + '</td>'
+        + '<td>' + idBadge + '</td>'
+        + '<td>' + statusBadge + '</td>'
+        + '<td>' + formatDate(u.createdAt) + '</td>'
+        + '<td class="td-actions">' + actionBtns + '</td>'
+        + '</tr>';
+    }).join('');
+
+    const pagination = data.pagination;
+    if (pagination && pagination.totalPages > 1) {
+      pagEl.style.display = 'flex';
+      document.getElementById('all-users-page-info').textContent = 'Page ' + pagination.page + ' / ' + pagination.totalPages + ' (' + pagination.total + ' utilisateurs)';
+      document.getElementById('all-users-prev').disabled = pagination.page <= 1;
+      document.getElementById('all-users-next').disabled = pagination.page >= pagination.totalPages;
+    } else {
+      pagEl.style.display = 'none';
+    }
+  } catch (err) {
+    if (err.message !== 'Unauthorized') void err;
   }
 }
 
@@ -1165,6 +1459,99 @@ async function resetClientPassword(userId, name) {
 // ══════════════════════════════════════════════════════════════
 // PROJECTS
 // ══════════════════════════════════════════════════════════════
+let _projectsMap = null;
+let _projectsMapLoaded = false;
+
+function switchProjectTab(tab) {
+  const isList = tab === 'list';
+  document.getElementById('proj-view-list').style.display = isList ? '' : 'none';
+  document.getElementById('proj-view-map').style.display  = isList ? 'none' : '';
+  document.getElementById('proj-tab-list').style.borderBottomColor = isList ? 'var(--orange)' : 'transparent';
+  document.getElementById('proj-tab-list').style.color             = isList ? 'var(--orange)' : 'var(--muted)';
+  document.getElementById('proj-tab-map').style.borderBottomColor  = isList ? 'transparent' : 'var(--orange)';
+  document.getElementById('proj-tab-map').style.color              = isList ? 'var(--muted)' : 'var(--orange)';
+  if (!isList) loadProjectsMap();
+}
+
+const MAP_COLORS = {
+  OPEN:        '#22c55e',
+  IN_PROGRESS: '#3b82f6',
+  COMPLETED:   '#F4720B',
+  CANCELLED:   '#ef4444',
+};
+
+function makeMarkerIcon(color) {
+  return L.divIcon({
+    className: '',
+    html: '<div style="width:14px;height:14px;border-radius:50%;background:' + color + ';border:2px solid rgba(255,255,255,0.8);box-shadow:0 2px 6px rgba(0,0,0,.4);"></div>',
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+    popupAnchor: [0, -10],
+  });
+}
+
+async function loadProjectsMap() {
+  const status = document.getElementById('map-status-filter').value;
+  const countEl = document.getElementById('map-count');
+  const noGeoEl = document.getElementById('map-no-geo');
+
+  countEl.textContent = 'Chargement…';
+  try {
+    let url = '/admin/projects/map';
+    if (status) url += '?status=' + encodeURIComponent(status);
+    const data = await apiCall(url);
+    const projects = data.projects || [];
+
+    countEl.textContent = projects.length + ' projet' + (projects.length !== 1 ? 's' : '') + ' géolocalisé' + (projects.length !== 1 ? 's' : '');
+    noGeoEl.style.display = projects.length === 0 ? 'block' : 'none';
+
+    // Initialiser la carte une seule fois
+    if (!_projectsMap) {
+      _projectsMap = L.map('projects-map', { zoomControl: true }).setView([5.35, -4.0], 6);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 18,
+      }).addTo(_projectsMap);
+    }
+
+    // Supprimer les anciens marqueurs
+    if (_projectsMap._manawa_layer) _projectsMap._manawa_layer.clearLayers();
+    const layer = L.layerGroup().addTo(_projectsMap);
+    _projectsMap._manawa_layer = layer;
+
+    const STATUS_LABELS = { OPEN: 'Ouvert', IN_PROGRESS: 'En cours', COMPLETED: 'Terminé', CANCELLED: 'Annulé' };
+    projects.forEach(p => {
+      const color = MAP_COLORS[p.status] || '#888';
+      const client = p.client ? (p.client.firstName + ' ' + p.client.lastName) : '—';
+      const budget = (p.budgetMin || p.budgetMax)
+        ? ((p.budgetMin || 0).toLocaleString('fr-FR') + ' – ' + (p.budgetMax || '?').toLocaleString('fr-FR') + ' FCFA')
+        : 'Budget non précisé';
+      const popup = '<div style="font-family:DM Sans,sans-serif;min-width:180px;">'
+        + '<strong style="font-size:13px;">' + escHtml(p.title) + '</strong><br>'
+        + '<span style="font-size:11px;color:#6B7280;">' + escHtml(p.city || '') + ' · ' + escHtml(p.tradeNeeded || '') + '</span><br>'
+        + '<span style="display:inline-block;margin:4px 0;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;background:' + color + '22;color:' + color + ';">' + STATUS_LABELS[p.status] + '</span><br>'
+        + '<span style="font-size:11px;">👤 ' + escHtml(client) + '</span><br>'
+        + '<span style="font-size:11px;">💰 ' + escHtml(budget) + '</span>'
+        + '</div>';
+      L.marker([p.latitude, p.longitude], { icon: makeMarkerIcon(color) })
+        .addTo(layer)
+        .bindPopup(popup);
+    });
+
+    // Centrer sur les marqueurs si présents
+    if (projects.length > 0) {
+      const bounds = L.latLngBounds(projects.map(p => [p.latitude, p.longitude]));
+      _projectsMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+    }
+
+    // Forcer le recalcul de la taille (la div était cachée à l'init)
+    setTimeout(() => _projectsMap.invalidateSize(), 50);
+
+  } catch (err) {
+    countEl.textContent = 'Erreur de chargement';
+  }
+}
+
 async function loadProjects(page = 1) {
   try {
     // Charger les KPIs depuis le dashboard
@@ -1395,27 +1782,201 @@ async function loadPaymentStats() {
       '<div style="flex:1;text-align:center;font-size:9px;color:var(--muted);">' + m.label + '</div>'
     ).join('');
 
-    // Totaux acomptes vs soldes
-    try {
-      const [deposits, balances] = await Promise.all([
-        apiCall('/admin/payments?status=succeeded&limit=1'),
-        apiCall('/admin/payments?status=succeeded&limit=1'),
-      ]);
-      // Calcul depuis les paiements succeeded
-      const allSucceeded = await apiCall('/admin/payments?status=succeeded&limit=100');
-      let depTotal = 0, balTotal = 0;
-      (allSucceeded.payments || []).forEach(p => {
-        if (p.isDeposit === true) depTotal += p.amount;
-        else if (p.isDeposit === false) balTotal += p.amount;
-      });
-      document.getElementById('pay-chart-deposit').textContent = formatCurrency(depTotal) + ' FCFA';
-      document.getElementById('pay-chart-balance').textContent = formatCurrency(balTotal) + ' FCFA';
-    } catch(e) {}
+    // Totaux acomptes vs soldes (depuis les agrégats de /payments/stats)
+    document.getElementById('pay-chart-deposit').textContent = formatCurrency(stats.depositTotal || 0) + ' FCFA';
+    document.getElementById('pay-chart-balance').textContent = formatCurrency(stats.balanceTotal || 0) + ' FCFA';
 
   } catch (err) {
     if (err.message !== 'Unauthorized') {
       void err;
     }
+  }
+}
+
+function switchPayTab(tab) {
+  ['list','recon','export'].forEach(t => {
+    document.getElementById('pay-view-' + t).style.display = t === tab ? '' : 'none';
+    const btn = document.getElementById('pay-tab-' + t);
+    if (btn) {
+      btn.style.borderBottomColor = t === tab ? 'var(--orange)' : 'transparent';
+      btn.style.color             = t === tab ? 'var(--orange)' : 'var(--muted)';
+    }
+  });
+  if (tab === 'recon')  loadReconciliation();
+}
+
+async function loadReconciliation() {
+  const reconciled = document.getElementById('recon-filter').value;
+  const dateFrom   = document.getElementById('recon-date-from').value;
+  const dateTo     = document.getElementById('recon-date-to').value;
+
+  let url = '/admin/payments/reconciliation?';
+  if (reconciled !== '') url += 'reconciled=' + encodeURIComponent(reconciled) + '&';
+  if (dateFrom) url += 'dateFrom=' + encodeURIComponent(dateFrom) + '&';
+  if (dateTo)   url += 'dateTo='   + encodeURIComponent(dateTo)   + '&';
+
+  try {
+    const data = await apiCall(url);
+    const payments = data.payments || [];
+    const tbody    = document.getElementById('recon-tbody');
+    const emptyEl  = document.getElementById('recon-empty');
+    const summary  = document.getElementById('recon-summary');
+
+    summary.textContent = data.total + ' paiement' + (data.total !== 1 ? 's' : '') + ' · ' + formatCurrency(data.totalAmount) + ' FCFA';
+
+    if (payments.length === 0) {
+      tbody.innerHTML = '';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    tbody.innerHTML = payments.map(p => {
+      const pro = p.quote?.professional?.user
+        ? (p.quote.professional.user.firstName + ' ' + p.quote.professional.user.lastName) : '—';
+      const project = p.quote?.project?.title || '—';
+      const typeBadge = p.isDeposit
+        ? '<span class="badge badge-orange">Acompte 30%</span>'
+        : '<span class="badge badge-blue">Solde 70%</span>';
+      const isRecon = !!p.reconciledAt;
+      const reconBadge = isRecon
+        ? '<span class="badge badge-green">✓ Rapproché</span>'
+        : '<span class="badge badge-muted">En attente</span>';
+      const actions = isRecon
+        ? '<button class="btn btn-view" onclick="unreconcilePayment(\'' + escAttr(p.id) + '\')" title="Annuler rapprochement" style="font-size:11px;">↩</button>'
+        : '<button class="btn btn-approve" onclick="openReconcileModal(\'' + escAttr(p.id) + '\',\'' + escAttr(p.geniuspayRef || '') + '\')" style="font-size:11px;">✓ Rapprocher</button>';
+
+      return '<tr>'
+        + '<td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" onclick="navigator.clipboard.writeText(\'' + escAttr(p.id) + '\');showToast(\'ID copié\')">' + escHtml(p.id.substring(0,6)) + '</span></td>'
+        + '<td>' + formatDate(p.createdAt) + '</td>'
+        + '<td style="color:var(--orange);font-weight:600;">' + formatNumber(p.amount) + ' FCFA</td>'
+        + '<td>' + typeBadge + '</td>'
+        + '<td><strong>' + escHtml(project) + '</strong><br><span style="font-size:11px;color:var(--muted);">' + escHtml(pro) + '</span></td>'
+        + '<td style="font-family:monospace;font-size:11px;">' + escHtml(p.geniuspayRef || '—') + '</td>'
+        + '<td style="font-family:monospace;font-size:11px;color:var(--blue);">' + escHtml(p.bankRef || '—') + '</td>'
+        + '<td>' + (p.reconciledAt ? formatDate(p.reconciledAt) : '—') + '</td>'
+        + '<td class="td-actions">' + actions + '</td>'
+        + '</tr>';
+    }).join('');
+  } catch (err) {
+    if (err.message !== 'Unauthorized') showToast('Erreur rapprochement', true);
+  }
+}
+
+function openReconcileModal(payId, geniusRef) {
+  document.getElementById('rcl-pay-id').value = payId;
+  document.getElementById('rcl-genius-ref').textContent = geniusRef || '—';
+  document.getElementById('rcl-bank-ref').value = '';
+  document.getElementById('rcl-error').style.display = 'none';
+  openModal('modal-reconcile');
+}
+
+async function submitReconcile() {
+  const id      = document.getElementById('rcl-pay-id').value;
+  const bankRef = document.getElementById('rcl-bank-ref').value.trim();
+  const errEl   = document.getElementById('rcl-error');
+  const btn     = document.getElementById('rcl-btn');
+
+  errEl.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Rapprochement…';
+  try {
+    await apiCall('/admin/payments/' + id + '/reconcile', {
+      method: 'PATCH',
+      body: JSON.stringify({ bankRef }),
+    });
+    showToast('Paiement rapproché');
+    closeModal('modal-reconcile');
+    loadReconciliation();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Confirmer le rapprochement';
+  }
+}
+
+async function unreconcilePayment(id) {
+  if (!confirm('Annuler le rapprochement de ce paiement ?')) return;
+  try {
+    await apiCall('/admin/payments/' + id + '/unreconcile', { method: 'PATCH' });
+    showToast('Rapprochement annulé');
+    loadReconciliation();
+  } catch (err) { showToast(err.message, true); }
+}
+
+async function exportAccountingCSV() {
+  const dateFrom = document.getElementById('acc-date-from').value;
+  const dateTo   = document.getElementById('acc-date-to').value;
+  const status   = document.getElementById('acc-status').value;
+
+  let url = '/admin/payments/export-accounting?';
+  if (status)   url += 'status='   + encodeURIComponent(status)   + '&';
+  if (dateFrom) url += 'dateFrom=' + encodeURIComponent(dateFrom) + '&';
+  if (dateTo)   url += 'dateTo='   + encodeURIComponent(dateTo)   + '&';
+
+  try {
+    showToast('Export en cours…');
+    // Le backend retourne directement le CSV avec Content-Disposition
+    const resp = await fetch(window.location.origin + '/api' + url, {
+      credentials: 'include',
+      headers: { 'X-CSRF-Token': getCsrfToken() },
+    });
+    if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || 'Erreur export'); }
+    const blob = await resp.blob();
+    const bUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = bUrl;
+    a.download = 'manawa_comptabilite_' + new Date().toISOString().slice(0,10) + '.csv';
+    a.click(); URL.revokeObjectURL(bUrl);
+    showToast('Export comptable téléchargé');
+  } catch (err) { showToast('Erreur : ' + err.message, true); }
+}
+
+// ── Remboursements ──────────────────────────────────────────
+function openRefundModal(payId, amount, projectTitle, proName) {
+  document.getElementById('rfnd-pay-id').value    = payId;
+  document.getElementById('rfnd-amount').value    = '';
+  document.getElementById('rfnd-reason').value    = '';
+  document.getElementById('rfnd-note').value      = '';
+  document.getElementById('rfnd-error').style.display = 'none';
+  document.getElementById('rfnd-pay-info').innerHTML =
+    '<strong>' + escHtml(projectTitle) + '</strong><br>'
+    + '<span style="color:var(--muted);font-size:12px;">' + escHtml(proName) + ' · </span>'
+    + '<strong style="color:var(--orange);">' + formatNumber(amount) + ' FCFA</strong>';
+  openModal('modal-refund');
+}
+
+async function submitRefund(mode) {
+  const payId  = document.getElementById('rfnd-pay-id').value;
+  const amount = parseFloat(document.getElementById('rfnd-amount').value);
+  const reason = document.getElementById('rfnd-reason').value.trim();
+  const note   = document.getElementById('rfnd-note').value.trim();
+  const errEl  = document.getElementById('rfnd-error');
+
+  errEl.style.display = 'none';
+  if (!amount || amount <= 0) { errEl.textContent = 'Montant requis'; errEl.style.display = 'block'; return; }
+  if (!reason) { errEl.textContent = 'Le motif est requis'; errEl.style.display = 'block'; return; }
+
+  const route = mode === 'geniuspay'
+    ? '/admin/payments/' + payId + '/refund'
+    : '/admin/payments/' + payId + '/refund-manual';
+  const btnId = mode === 'geniuspay' ? 'rfnd-btn-gp' : 'rfnd-btn-manual';
+  const btn   = document.getElementById(btnId);
+  const origLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Traitement…';
+
+  try {
+    await apiCall(route, { method: 'POST', body: JSON.stringify({ amount, reason, note }) });
+    showToast('Remboursement enregistré avec succès');
+    closeModal('modal-refund');
+    loadPayments(payCurrentPage);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origLabel;
   }
 }
 
@@ -1460,7 +2021,24 @@ async function loadPayments(page) {
       const disputeBtn = pay.status === 'succeeded'
         ? '<button class="btn btn-danger" onclick="openCreateDisputeModal(\'' + escAttr(pay.id) + '\',' + formatNumber(pay.amount) + ',\'' + escAttr(proName) + '\',\'' + escAttr(projectTitle) + '\')" title="Ouvrir un litige" style="padding:4px 8px;font-size:12px;">⚖️</button>'
         : '';
-      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(pay.id) + '" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + escAttr(pay.id) + '\');showToast(\'ID copié\')">' + escHtml(pay.id.substring(0, 6)) + '</span></td><td style="color:var(--orange);font-weight:600">' + formatNumber(pay.amount) + ' FCFA</td><td>' + typeBadge + '</td><td>' + statusBadge + '</td><td>' + escHtml(proName) + '</td><td>' + escHtml(projectTitle) + '</td><td>' + formatDate(pay.createdAt) + '</td><td class="td-actions"><button class="btn btn-view" onclick="viewPaymentAuditLog(\'' + escAttr(pay.id) + '\')" title="Journal audit">📜</button>' + disputeBtn + '</td></tr>';
+
+      const refundBadge = pay.refundedAt
+        ? '<br><span class="badge badge-muted" style="font-size:9px;margin-top:2px;">💸 Remb. ' + formatNumber(pay.refundAmount) + ' F</span>'
+        : '';
+      const refundBtn = (pay.status === 'succeeded' && !pay.refundedAt)
+        ? '<button class="btn btn-view" onclick="event.stopPropagation();openRefundModal(\'' + escAttr(pay.id) + '\',' + pay.amount + ',\'' + escAttr(projectTitle) + '\',\'' + escAttr(proName) + '\')" title="Rembourser" style="padding:4px 8px;font-size:12px;">💸</button>'
+        : '';
+
+      return '<tr>'
+        + '<td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(pay.id) + '" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + escAttr(pay.id) + '\');showToast(\'ID copié\')">' + escHtml(pay.id.substring(0, 6)) + '</span></td>'
+        + '<td style="color:var(--orange);font-weight:600">' + formatNumber(pay.amount) + ' FCFA' + refundBadge + '</td>'
+        + '<td>' + typeBadge + '</td>'
+        + '<td>' + statusBadge + '</td>'
+        + '<td>' + escHtml(proName) + '</td>'
+        + '<td>' + escHtml(projectTitle) + '</td>'
+        + '<td>' + formatDate(pay.createdAt) + '</td>'
+        + '<td class="td-actions"><button class="btn btn-view" onclick="viewPaymentAuditLog(\'' + escAttr(pay.id) + '\')" title="Journal audit">📜</button>' + disputeBtn + refundBtn + '</td>'
+        + '</tr>';
     }).join('');
 
     // Pagination
@@ -1576,9 +2154,7 @@ async function loadModeration(page = 1) {
 async function openModerationModal(reportId) {
   currentReportId = reportId;
   try {
-    // Recharger les données fraîches
-    const data = await apiCall('/admin/moderation/reports?limit=100&status=');
-    const r = (data.reports || []).find(x => x.id === reportId);
+    const r = await apiCall('/admin/moderation/reports/' + reportId);
     if (!r) { showToast('Signalement introuvable', true); return; }
 
     const c = r.content;
@@ -2271,15 +2847,13 @@ async function loadDeletedUsers(page = 1) {
     const tbody = document.getElementById('deleted-tbody');
     const empty = document.getElementById('deleted-empty');
 
-    // KPIs — calculés sur la première page sans filtre de recherche
+    // KPIs — route dédiée, agrégats sans rapatrier toutes les lignes
     if (page === 1 && !search) {
-      const allResult = await apiCall('/admin/users-deleted?page=1&limit=5000');
-      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-      const restorable = (allResult.users || []).filter(u => new Date(u.deletedAt).getTime() > thirtyDaysAgo).length;
-      const old = (allResult.total || 0) - restorable;
-      document.getElementById('del-kpi-total').textContent   = formatNumber(allResult.total || 0);
-      document.getElementById('del-kpi-restore').textContent = formatNumber(restorable);
-      document.getElementById('del-kpi-old').textContent     = formatNumber(old);
+      apiCall('/admin/users-deleted/stats').then(s => {
+        document.getElementById('del-kpi-total').textContent   = formatNumber(s.total || 0);
+        document.getElementById('del-kpi-restore').textContent = formatNumber(s.restorable || 0);
+        document.getElementById('del-kpi-old').textContent     = formatNumber(s.old || 0);
+      }).catch(() => {});
     }
 
     if (!result.users || result.users.length === 0) {
@@ -2367,6 +2941,10 @@ function openRejectModal(name, proId) {
   document.getElementById('modal-reject').classList.add('show');
 }
 
+function openModal(id) {
+  document.getElementById(id).classList.add('show');
+}
+
 function closeModal(id) {
   document.getElementById(id).classList.remove('show');
 }
@@ -2423,13 +3001,21 @@ function formatDate(dateStr) {
 }
 
 function escHtml(str) {
-  if (!str) return '';
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
 }
 
 function escAttr(str) {
-  if (!str) return '';
-  return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  if (str === null || str === undefined) return '';
+  const s = String(str);
+  // Bloquer les URLs javascript: dans les attributs href/src
+  if (/^\s*javascript\s*:/i.test(s)) return '#';
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;').replace(/\n/g, '&#10;').replace(/\r/g, '&#13;');
 }
 
 function getStatusBadge(status) {
@@ -2444,10 +3030,12 @@ function getStatusBadge(status) {
 
 function getPaymentStatusBadge(status) {
   switch (status) {
-    case 'succeeded': return '<span class="badge badge-green">✓ Succès</span>';
-    case 'pending': return '<span class="badge badge-yellow">⏳ En attente</span>';
-    case 'failed': return '<span class="badge badge-red">✕ Échoué</span>';
-    default: return '<span class="badge badge-muted">' + escHtml(status || '-') + '</span>';
+    case 'succeeded':     return '<span class="badge badge-green">✓ Succès</span>';
+    case 'pending':       return '<span class="badge badge-yellow">⏳ En attente</span>';
+    case 'failed':        return '<span class="badge badge-red">✕ Échoué</span>';
+    case 'refunded':      return '<span class="badge badge-muted">💸 Remboursé</span>';
+    case 'partial_refund':return '<span class="badge badge-blue">💸 Remb. partiel</span>';
+    default:              return '<span class="badge badge-muted">' + escHtml(status || '-') + '</span>';
   }
 }
 
@@ -2470,7 +3058,7 @@ function getTradeEmoji(trade) {
 let secDebounceTimer = null;
 
 async function loadSecurity() {
-  await Promise.all([loadSecurityStats(), loadSecurityAlerts(), loadSuspended(1), loadSecurityActivity()]);
+  await Promise.all([loadSecurityStats(), loadSecurityAlerts(), loadSuspended(1), loadSecurityActivity(), loadAllowedIPs()]);
 }
 
 async function loadSecurityStats() {
@@ -2570,7 +3158,7 @@ async function loadSuspended(page) {
       + '<td><span class="badge badge-' + (u.role === 'PROFESSIONAL' ? 'orange' : 'blue') + '">' + (roleLabel[u.role] || u.role) + '</span></td>'
       + '<td style="color:var(--muted);font-size:12px;">' + escHtml(u.city || '--') + '</td>'
       + '<td style="color:var(--muted);font-size:12px;">' + new Date(u.updatedAt).toLocaleDateString('fr-FR') + '</td>'
-      + '<td><button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;color:var(--green);" onclick="reactivateUser(\'' + u.id + '\',\'' + escHtml(u.firstName + ' ' + u.lastName).replace(/'/g,'') + '\')">✅ Réactiver</button></td>'
+      + '<td><button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;color:var(--green);" onclick="reactivateUserFromSecurity(\'' + u.id + '\',\'' + escHtml(u.firstName + ' ' + u.lastName).replace(/'/g,'') + '\')">✅ Réactiver</button></td>'
       + '</tr>'
     ).join('');
 
@@ -2593,7 +3181,7 @@ function debounceSecSearch() {
   secDebounceTimer = setTimeout(() => loadSuspended(1), 350);
 }
 
-async function reactivateUser(userId, name) {
+async function reactivateUserFromSecurity(userId, name) {
   if (!confirm('Réactiver le compte de ' + name + ' ?')) return;
   try {
     await apiCall('/admin/users/' + userId + '/reactivate', { method: 'PATCH' });
@@ -2640,6 +3228,102 @@ async function loadSecurityActivity() {
     ).join('');
   } catch (err) {
     showToast('Erreur journal activité', true);
+  }
+}
+
+// ── IPs autorisées ──────────────────────────────────────────
+let _myCurrentIP = null;
+
+async function loadAllowedIPs() {
+  try {
+    // Récupérer l'IP actuelle du navigateur
+    try {
+      const ipRes = await fetch('https://api.ipify.org?format=json');
+      const ipData = await ipRes.json();
+      _myCurrentIP = ipData.ip;
+    } catch {}
+
+    const data = await apiCall('/admin/security/allowed-ips');
+    const ips = data.ips || [];
+    const tbody = document.getElementById('ip-whitelist-tbody');
+    const empty = document.getElementById('ip-whitelist-empty');
+    const banner = document.getElementById('ip-current-banner');
+    const bannerVal = document.getElementById('ip-current-val');
+    const bannerStatus = document.getElementById('ip-current-status');
+
+    if (_myCurrentIP) {
+      bannerVal.textContent = _myCurrentIP;
+      const isAllowed = ips.length === 0 || ips.some(e => e.ip === _myCurrentIP);
+      bannerStatus.innerHTML = isAllowed
+        ? ' &nbsp;<span style="color:var(--green);font-weight:600;">✓ autorisée</span>'
+        : ' &nbsp;<span style="color:var(--red);font-weight:600;">✗ non dans la liste</span>';
+      banner.style.display = '';
+    }
+
+    if (ips.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+    tbody.innerHTML = ips.map(e => {
+      const isMine = _myCurrentIP && e.ip === _myCurrentIP;
+      return '<tr>'
+        + '<td style="font-family:monospace;font-size:13px;">' + escHtml(e.ip) + (isMine ? ' <span style="color:var(--green);font-size:11px;">(vous)</span>' : '') + '</td>'
+        + '<td>' + (e.label ? escHtml(e.label) : '<span style="color:var(--muted);">—</span>') + '</td>'
+        + '<td style="font-size:12px;color:var(--muted);">' + (e.addedAt ? new Date(e.addedAt).toLocaleDateString('fr-FR') : '—') + '</td>'
+        + '<td style="font-size:12px;color:var(--muted);">' + escHtml(e.addedBy || '—') + '</td>'
+        + '<td>' + (isMine
+          ? '<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;opacity:.4;" title="Impossible de supprimer votre propre IP" disabled>🗑</button>'
+          : '<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="removeIP(\'' + escAttr(e.ip) + '\')">🗑</button>')
+        + '</td>'
+        + '</tr>';
+    }).join('');
+  } catch (err) {
+    if (err.status !== 403) showToast('Erreur chargement IPs', true);
+  }
+}
+
+function openAddIpModal() {
+  document.getElementById('ip-add-value').value = '';
+  document.getElementById('ip-add-label').value = '';
+  document.getElementById('ip-add-error').style.display = 'none';
+  const myIpSpan = document.getElementById('ip-add-my-ip');
+  myIpSpan.textContent = _myCurrentIP ? _myCurrentIP : '';
+  openModal('modal-add-ip');
+}
+
+function fillMyIp() {
+  if (_myCurrentIP) document.getElementById('ip-add-value').value = _myCurrentIP;
+}
+
+async function submitAddIp() {
+  const ip = document.getElementById('ip-add-value').value.trim();
+  const label = document.getElementById('ip-add-label').value.trim();
+  const errEl = document.getElementById('ip-add-error');
+  errEl.style.display = 'none';
+
+  if (!ip) { errEl.textContent = 'L\'adresse IP est requise'; errEl.style.display = ''; return; }
+
+  try {
+    await apiCall('/admin/security/allowed-ips', 'POST', { ip, label });
+    closeModal('modal-add-ip');
+    showToast('IP ajoutée avec succès');
+    loadAllowedIPs();
+  } catch (err) {
+    errEl.textContent = err.message || 'Erreur lors de l\'ajout';
+    errEl.style.display = '';
+  }
+}
+
+async function removeIP(ip) {
+  if (!confirm('Supprimer l\'IP ' + ip + ' de la liste des accès autorisés ?')) return;
+  try {
+    await apiCall('/admin/security/allowed-ips/' + encodeURIComponent(ip), 'DELETE');
+    showToast('IP supprimée');
+    loadAllowedIPs();
+  } catch (err) {
+    showToast(err.message || 'Erreur suppression IP', true);
   }
 }
 
@@ -3281,6 +3965,18 @@ async function loadSupportStats() {
       ? (d.avgResolutionHours < 24 ? d.avgResolutionHours + 'h' : Math.round(d.avgResolutionHours / 24) + 'j')
       : '—';
 
+    // Nouvelles métriques
+    const resolveRateEl = document.getElementById('sup-kpi-resolve-rate');
+    if (resolveRateEl) resolveRateEl.textContent = (d.resolveRate || 0).toFixed(1) + '%';
+
+    const firstRespEl = document.getElementById('sup-kpi-first-response');
+    if (firstRespEl) firstRespEl.textContent = d.avgFirstResponseHours !== null
+      ? (d.avgFirstResponseHours < 24 ? d.avgFirstResponseHours.toFixed(1) + 'h' : Math.round(d.avgFirstResponseHours / 24) + 'j')
+      : '—';
+
+    const urgentEl = document.getElementById('sup-kpi-urgent');
+    if (urgentEl) urgentEl.textContent = d.byPriority && d.byPriority['URGENT'] ? d.byPriority['URGENT'] : 0;
+
     // Mini-barres catégories
     const barsEl = document.getElementById('sup-category-bars');
     const total = d.total || 1;
@@ -3302,10 +3998,13 @@ async function loadSupportStats() {
 
 function debounceSupportSearch() {
   clearTimeout(supportDebounceTimer);
-  supportDebounceTimer = setTimeout(() => loadSupportTickets(), 400);
+  supportDebounceTimer = setTimeout(() => loadSupportTickets(1), 400);
 }
 
-async function loadSupportTickets() {
+let supportCurrentPage = 1;
+
+async function loadSupportTickets(page) {
+  if (page !== undefined) supportCurrentPage = page;
   try {
     const status   = document.getElementById('support-status-filter').value;
     const category = document.getElementById('support-category-filter').value;
@@ -3313,29 +4012,20 @@ async function loadSupportTickets() {
     const params   = new URLSearchParams();
     if (status)   params.set('status', status);
     if (category) params.set('category', category);
-    const qs  = params.toString();
-    let url = '/admin/support/tickets' + (qs ? '?' + qs : '');
-    const data = await apiCall(url);
+    if (search)   params.set('search', search);
+    params.set('page', supportCurrentPage);
+    params.set('limit', '20');
+    const data = await apiCall('/admin/support/tickets?' + params.toString());
     const tbody = document.getElementById('support-tbody');
     const empty = document.getElementById('support-empty');
 
-    let tickets = data.tickets || [];
-
-    // Filtrage côté client par recherche (ID, nom, email)
-    if (search) {
-      const q = search.toLowerCase();
-      tickets = tickets.filter(t => {
-        const name = ((t.user.firstName || '') + ' ' + (t.user.lastName || '')).toLowerCase();
-        const email = (t.user.email || '').toLowerCase();
-        const ticketId = (t.id || '').toLowerCase();
-        const subject = (t.subject || '').toLowerCase();
-        return ticketId.startsWith(q) || name.includes(q) || email.includes(q) || subject.includes(q);
-      });
-    }
+    const tickets = data.tickets || [];
 
     if (tickets.length === 0) {
       tbody.innerHTML = '';
       empty.style.display = 'block';
+      const pag = document.getElementById('support-pagination');
+      if (pag) pag.innerHTML = '';
       return;
     }
 
@@ -3345,16 +4035,58 @@ async function loadSupportTickets() {
     if (openCount > 0) { badge.textContent = openCount; badge.style.display = ''; }
     else { badge.style.display = 'none'; }
 
+    const PRIORITY_BADGES = {
+      LOW:    '<span class="badge badge-muted" style="font-size:10px;">🔽 Basse</span>',
+      NORMAL: '<span class="badge badge-blue" style="font-size:10px;">➡️ Normale</span>',
+      HIGH:   '<span class="badge badge-yellow" style="font-size:10px;">🔼 Haute</span>',
+      URGENT: '<span class="badge badge-red" style="font-size:10px;">🚨 Urgente</span>',
+    };
+
     tbody.innerHTML = tickets.map(t => {
       const u = t.user;
       const name = (u.firstName || '') + ' ' + (u.lastName || '');
       const cat = SUPPORT_CATEGORIES[t.category] || t.category;
       const st = SUPPORT_STATUS[t.status] || SUPPORT_STATUS.OPEN;
+      const prio = PRIORITY_BADGES[t.priority || 'NORMAL'] || PRIORITY_BADGES.NORMAL;
       const lastMsg = t.messages && t.messages[0] ? (t.messages[0].isAdmin ? '🛡️ ' : '') + t.messages[0].content.substring(0, 50) : '-';
-      return '<tr><td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(t.id) + '" onclick="navigator.clipboard.writeText(\'' + escAttr(t.id) + '\');showToast(\'ID copié\')">#' + escHtml(t.id.substring(0, 6)) + '</span></td><td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + '</span><br><span class="badge badge-' + (u.role === 'PROFESSIONAL' ? 'orange' : 'blue') + '" style="font-size:9px;margin-top:2px;">' + (u.role === 'PROFESSIONAL' ? 'Pro' : 'Client') + '</span></td><td>' + cat + '</td><td><strong>' + escHtml(t.subject) + '</strong></td><td><span class="badge ' + st.badge + '">' + st.label + '</span></td><td style="font-size:12px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(lastMsg) + '</td><td>' + formatDate(t.updatedAt) + '</td><td class="td-actions"><button class="btn btn-view" onclick="event.stopPropagation();openSupportTicket(\'' + t.id + '\')">💬 Ouvrir</button></td></tr>';
+      return '<tr>'
+        + '<td><span style="font-family:monospace;font-size:11px;color:var(--orange);cursor:pointer;" title="' + escAttr(t.id) + '" onclick="navigator.clipboard.writeText(\'' + escAttr(t.id) + '\');showToast(\'ID copié\')">#' + escHtml(t.id.substring(0, 6)) + '</span></td>'
+        + '<td><strong>' + escHtml(name) + '</strong><br><span style="font-size:11px;color:var(--muted)">' + escHtml(u.email) + '</span><br><span class="badge badge-' + (u.role === 'PROFESSIONAL' ? 'orange' : 'blue') + '" style="font-size:9px;margin-top:2px;">' + (u.role === 'PROFESSIONAL' ? 'Pro' : 'Client') + '</span></td>'
+        + '<td>' + cat + '</td>'
+        + '<td><strong>' + escHtml(t.subject) + '</strong></td>'
+        + '<td>' + prio + '<br><select style="margin-top:4px;font-size:10px;background:var(--dark3);border:1px solid var(--border);color:var(--white);border-radius:6px;padding:2px 4px;" onchange="setTicketPriority(\'' + escAttr(t.id) + '\',this.value)" onclick="event.stopPropagation()"><option value="LOW"' + (t.priority==='LOW'?' selected':'') + '>Basse</option><option value="NORMAL"' + (t.priority==='NORMAL'||!t.priority?' selected':'') + '>Normale</option><option value="HIGH"' + (t.priority==='HIGH'?' selected':'') + '>Haute</option><option value="URGENT"' + (t.priority==='URGENT'?' selected':'') + '>Urgente</option></select></td>'
+        + '<td><span class="badge ' + st.badge + '">' + st.label + '</span></td>'
+        + '<td style="font-size:12px;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(lastMsg) + '</td>'
+        + '<td>' + formatDate(t.updatedAt) + '</td>'
+        + '<td class="td-actions"><button class="btn btn-view" onclick="event.stopPropagation();openSupportTicket(\'' + t.id + '\')">💬 Ouvrir</button></td>'
+        + '</tr>';
     }).join('');
+
+    // Pagination
+    const pag = document.getElementById('support-pagination');
+    if (pag) {
+      const totalPages = data.totalPages || 1;
+      let pagHtml = '';
+      if (supportCurrentPage > 1) pagHtml += '<button class="btn btn-view" onclick="loadSupportTickets(' + (supportCurrentPage - 1) + ')">← Précédent</button>';
+      pagHtml += '<span style="color:var(--muted);font-size:13px;padding:8px;">Page ' + supportCurrentPage + ' / ' + totalPages + ' (' + (data.total || tickets.length) + ' tickets)</span>';
+      if (supportCurrentPage < totalPages) pagHtml += '<button class="btn btn-view" onclick="loadSupportTickets(' + (supportCurrentPage + 1) + ')">Suivant →</button>';
+      pag.innerHTML = totalPages > 1 ? pagHtml : '';
+    }
   } catch (err) {
     void err;
+  }
+}
+
+async function setTicketPriority(ticketId, priority) {
+  try {
+    await apiCall('/admin/support/tickets/' + ticketId + '/priority', {
+      method: 'PATCH',
+      body: JSON.stringify({ priority }),
+    });
+    showToast('Priorité mise à jour');
+    loadSupportStats();
+  } catch (err) {
+    showToast('Erreur : ' + err.message, true);
   }
 }
 
@@ -3767,6 +4499,744 @@ async function reviewModalDelete() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+// ÉQUIPE ADMIN
+// ══════════════════════════════════════════════════════════════
+async function loadAdminTeam() {
+  try {
+    // Charger les infos de sécurité du super admin connecté
+    const me = await apiCall('/admin/me');
+    const cpQLabel = document.getElementById('cp-question-label');
+    const cpNoQ    = document.getElementById('cp-no-question');
+    if (me.securityQuestion) {
+      // Formulaire remplacé par le bandeau verrouillé
+      document.getElementById('admin-sq-display').textContent = me.securityQuestion;
+      document.getElementById('sq-locked').style.display = 'block';
+      document.getElementById('sq-form').style.display   = 'none';
+      // Formulaire changement de mdp : afficher la question
+      cpQLabel.textContent = '❓ ' + me.securityQuestion;
+      cpQLabel.style.display = 'block';
+      cpNoQ.style.display = 'none';
+    } else {
+      document.getElementById('sq-locked').style.display = 'none';
+      document.getElementById('sq-form').style.display   = 'flex';
+      cpQLabel.style.display = 'none';
+      cpNoQ.style.display = 'block';
+    }
+
+    const data  = await apiCall('/admin/admins');
+    const tbody = document.getElementById('admin-team-tbody');
+    const empty = document.getElementById('admin-team-empty');
+    const admins = data.admins || [];
+
+    if (admins.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+
+    // Afficher les équipes
+    loadAdminTeams();
+
+    tbody.innerHTML = admins.map(a => {
+      const name    = ((a.firstName || '') + ' ' + (a.lastName || '')).trim();
+      const isSuper = a.adminLevel === 'SUPER';
+
+      const levelBadge = isSuper
+        ? '<span class="badge badge-orange">⭐ Super Admin</span>'
+        : '<span class="badge badge-muted">Admin Standard</span>';
+
+      const statusBadge = a.suspended
+        ? '<span class="badge badge-red">Suspendu</span>'
+        : '<span class="badge badge-green">Actif</span>';
+
+      const teamBadge = a.team
+        ? '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;background:' + (a.team.color || '#f4720b') + '22;color:' + (a.team.color || '#f4720b') + ';border:1px solid ' + (a.team.color || '#f4720b') + '44;">' + escHtml(a.team.name) + '</span>'
+        : '<span style="font-size:11px;color:var(--muted);">—</span>';
+
+      const lastLogin = a.lastLoginAt
+        ? '<span style="font-size:12px;">' + formatDate(a.lastLoginAt) + '</span>'
+        : '<span style="font-size:11px;color:var(--muted);">Jamais</span>';
+
+      let permsDisplay = '<span style="font-size:11px;color:var(--green);">✅ Accès total</span>';
+      if (isSuper) {
+        permsDisplay = '<span style="font-size:11px;color:var(--orange);">⭐ Super Admin</span>';
+      } else if (a.adminPermissions) {
+        try {
+          const p = JSON.parse(a.adminPermissions);
+          if (p.length === 0) {
+            permsDisplay = '<span style="font-size:11px;color:var(--red);">🚫 Aucun accès</span>';
+          } else {
+            const teamColor = a.team ? (a.team.color || '#f4720b') : 'var(--orange)';
+            const fromTeam  = !!a.team;
+            const badges = p.slice(0, 3).map(s =>
+              '<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:' + teamColor + '22;color:' + teamColor + ';border:1px solid ' + teamColor + '33;">'
+              + (SECTION_LABELS[s] || s) + '</span>'
+            ).join(' ');
+            const more = p.length > 3
+              ? '<span style="font-size:10px;color:var(--muted);"> +' + (p.length - 3) + '</span>' : '';
+            const source = fromTeam
+              ? '<div style="font-size:10px;color:var(--muted);margin-top:3px;">Hérité de l\'équipe</div>'
+              : '<div style="font-size:10px;color:var(--muted);margin-top:3px;">Défini manuellement</div>';
+            permsDisplay = '<div>' + badges + more + source + '</div>';
+          }
+        } catch {}
+      }
+
+      const actions = isSuper
+        ? '<span style="font-size:11px;color:var(--muted);">—</span>'
+        : (!a.suspended
+          ? '<button class="btn btn-reject" onclick="suspendAdminAccount(\'' + escAttr(a.id) + '\',\'' + escAttr(name) + '\')" title="Suspendre">⏸</button>'
+          : '<button class="btn btn-approve" onclick="reactivateAdminAccount(\'' + escAttr(a.id) + '\',\'' + escAttr(name) + '\')" title="Réactiver">↺</button>')
+          + ' <button class="btn btn-view" onclick="openAssignTeamModal(\'' + escAttr(a.id) + '\',\'' + escAttr(name) + '\',\'' + escAttr(a.adminTeamId||'') + '\')" title="Assigner une équipe">👥</button>'
+          + ' <button class="btn btn-view" onclick="openEditAdminModal(\'' + escAttr(a.id) + '\',\'' + escAttr(a.firstName||'') + '\',\'' + escAttr(a.lastName||'') + '\',\'' + escAttr(a.email||'') + '\')" title="Modifier le profil">✏️</button>'
+          + ' <button class="btn btn-view" onclick="openAdminPermsModal(\'' + escAttr(a.id) + '\',\'' + escAttr(name) + '\',' + JSON.stringify(a.adminPermissions || null) + ',\'' + escAttr(a.team ? a.team.name : '') + '\')" title="Permissions">🔐</button>'
+          + ' <button class="btn btn-view" onclick="openResetAdminPasswordModal(\'' + escAttr(a.id) + '\',\'' + escAttr(name) + '\')" title="Réinitialiser mot de passe">🔑</button>'
+          + ' <button class="btn btn-reject" onclick="deleteAdminAccount(\'' + escAttr(a.id) + '\',\'' + escAttr(name) + '\')" title="Supprimer">🗑</button>';
+
+      return '<tr>'
+        + '<td><strong>' + escHtml(name) + '</strong></td>'
+        + '<td style="font-size:12px;">' + escHtml(a.email) + '</td>'
+        + '<td>' + levelBadge + '</td>'
+        + '<td>' + teamBadge + '</td>'
+        + '<td>' + statusBadge + '</td>'
+        + '<td>' + lastLogin + '</td>'
+        + '<td>' + permsDisplay + '</td>'
+        + '<td class="td-actions">' + actions + '</td>'
+        + '</tr>';
+    }).join('');
+  } catch (err) {
+    if (err.message !== 'Unauthorized') showToast('Erreur chargement équipe', true);
+  }
+}
+
+async function suspendAdminAccount(id, name) {
+  if (!confirm('Suspendre le compte de ' + name + ' ? Il ne pourra plus se connecter au back-office.')) return;
+  try {
+    await apiCall('/admin/admins/' + id + '/suspend', { method: 'PATCH' });
+    showToast(name + ' suspendu');
+    loadAdminTeam();
+  } catch (err) { showToast(err.message, true); }
+}
+
+async function reactivateAdminAccount(id, name) {
+  if (!confirm('Réactiver le compte de ' + name + ' ?')) return;
+  try {
+    await apiCall('/admin/admins/' + id + '/reactivate', { method: 'PATCH' });
+    showToast(name + ' réactivé');
+    loadAdminTeam();
+  } catch (err) { showToast(err.message, true); }
+}
+
+async function deleteAdminAccount(id, name) {
+  if (!confirm('Supprimer définitivement le compte de ' + name + ' ? Cette action est irréversible.')) return;
+  try {
+    await apiCall('/admin/admins/' + id, { method: 'DELETE' });
+    showToast('Compte de ' + name + ' supprimé');
+    loadAdminTeam();
+  } catch (err) { showToast(err.message, true); }
+}
+
+function openResetAdminPasswordModal(id, name) {
+  document.getElementById('rap-admin-name').textContent = name;
+  document.getElementById('rap-id').value = id;
+  document.getElementById('rap-new-password').value = '';
+  document.getElementById('rap-confirm-password').value = '';
+  document.getElementById('rap-error').style.display = 'none';
+  openModal('modal-reset-admin-password');
+}
+
+async function submitResetAdminPassword() {
+  const id      = document.getElementById('rap-id').value;
+  const newPwd  = document.getElementById('rap-new-password').value;
+  const confirm = document.getElementById('rap-confirm-password').value;
+  const errEl   = document.getElementById('rap-error');
+  const btn     = document.getElementById('rap-btn');
+
+  errEl.style.display = 'none';
+  if (!newPwd || !confirm) { errEl.textContent = 'Les deux champs sont requis'; errEl.style.display = 'block'; return; }
+  if (newPwd !== confirm)  { errEl.textContent = 'Les mots de passe ne correspondent pas'; errEl.style.display = 'block'; return; }
+  if (newPwd.length < 8)   { errEl.textContent = 'Minimum 8 caractères'; errEl.style.display = 'block'; return; }
+
+  btn.disabled = true; btn.textContent = 'Modification...';
+  try {
+    await apiCall('/admin/admins/' + id + '/reset-password', {
+      method: 'PATCH',
+      body: JSON.stringify({ newPassword: newPwd }),
+    });
+    showToast('Mot de passe modifié');
+    closeModal('modal-reset-admin-password');
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Modifier le mot de passe';
+  }
+}
+
+// ── Modifier profil admin ──────────────────────────────────────
+function openEditAdminModal(id, firstName, lastName, email) {
+  document.getElementById('edit-admin-id').value        = id;
+  document.getElementById('edit-admin-firstname').value = firstName;
+  document.getElementById('edit-admin-lastname').value  = lastName;
+  document.getElementById('edit-admin-email').value     = email;
+  document.getElementById('edit-admin-error').style.display = 'none';
+  openModal('modal-edit-admin');
+}
+
+async function submitEditAdmin() {
+  const id        = document.getElementById('edit-admin-id').value;
+  const firstName = document.getElementById('edit-admin-firstname').value.trim();
+  const lastName  = document.getElementById('edit-admin-lastname').value.trim();
+  const email     = document.getElementById('edit-admin-email').value.trim();
+  const errEl     = document.getElementById('edit-admin-error');
+  const btn       = document.getElementById('edit-admin-btn');
+
+  errEl.style.display = 'none';
+  if (!firstName || !lastName || !email) { errEl.textContent = 'Tous les champs sont requis'; errEl.style.display = 'block'; return; }
+
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    await apiCall('/admin/admins/' + id + '/profile', { method: 'PATCH', body: JSON.stringify({ firstName, lastName, email }) });
+    showToast('Profil modifié avec succès');
+    closeModal('modal-edit-admin');
+    loadAdminTeam();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Enregistrer';
+  }
+}
+
+// ── Permissions granulaires ──────────────────────────────────────
+const ALL_SECTIONS = [
+  { key: 'verif-id',      label: '🛡️ Vérifications' },
+  { key: 'users-all',     label: '👤 Utilisateurs' },
+  { key: 'professionals', label: '👷 Professionnels' },
+  { key: 'clients',       label: '🧑 Clients' },
+  { key: 'projects',      label: '🏗️ Projets' },
+  { key: 'payments',      label: '💳 Paiements' },
+  { key: 'support',       label: '🎧 Support' },
+  { key: 'communication', label: '📣 Communication' },
+  { key: 'disputes',      label: '⚖️ Litiges' },
+  { key: 'audit',         label: '📜 Audit' },
+  { key: 'moderation',    label: '🛑 Modération' },
+  { key: 'reviews',       label: '⭐ Avis' },
+  { key: 'analytics',     label: '🔬 Analytics' },
+  { key: 'subscriptions', label: '💎 Abonnements' },
+  { key: 'market',        label: '📊 Marché' },
+  { key: 'companies',     label: '🏢 Entreprises' },
+  { key: 'portfolio',     label: '🖼️ Portfolios' },
+  { key: 'promos',        label: '🏷️ Promos' },
+  { key: 'quotes-admin',  label: '📋 Devis' },
+  { key: 'push',          label: '🔔 Notifications' },
+  { key: 'messaging',     label: '💬 Messagerie' },
+  { key: 'security',      label: '🔒 Sécurité' },
+  { key: 'deleted',       label: '🗄️ Corbeille' },
+];
+
+function openAdminPermsModal(id, name, permissionsJson, teamName) {
+  document.getElementById('perms-admin-id').value         = id;
+  document.getElementById('perms-admin-name').textContent = name;
+  document.getElementById('perms-error').style.display    = 'none';
+
+  // Avertissement si l'admin est dans une équipe
+  const warnEl = document.getElementById('perms-team-warning');
+  if (warnEl) {
+    if (teamName) {
+      warnEl.innerHTML = '⚠️ Cet admin appartient à l\'équipe <strong>' + escHtml(teamName) + '</strong>. Modifier ses permissions manuellement le détachera de son équipe.';
+      warnEl.style.display = 'block';
+    } else {
+      warnEl.style.display = 'none';
+    }
+  }
+
+  let current = null;
+  if (permissionsJson) {
+    try { current = JSON.parse(permissionsJson); } catch {}
+  }
+
+  const container = document.getElementById('perms-checkboxes');
+  container.innerHTML = ALL_SECTIONS.map(s => {
+    const checked = current === null || current.includes(s.key) ? 'checked' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;padding:6px 8px;border-radius:8px;background:var(--card);border:1px solid var(--border);">'
+      + '<input type="checkbox" data-key="' + s.key + '" ' + checked + ' style="width:14px;height:14px;accent-color:var(--orange);">'
+      + s.label + '</label>';
+  }).join('');
+
+  openModal('modal-admin-perms');
+}
+
+function setAllPerms(checked) {
+  document.querySelectorAll('#perms-checkboxes input[type=checkbox]').forEach(cb => cb.checked = checked);
+}
+
+async function submitAdminPerms() {
+  const id    = document.getElementById('perms-admin-id').value;
+  const errEl = document.getElementById('perms-error');
+  const btn   = document.getElementById('perms-btn');
+
+  errEl.style.display = 'none';
+  const checkboxes = document.querySelectorAll('#perms-checkboxes input[type=checkbox]');
+  const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+  const permissions = allChecked ? null : Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.dataset.key);
+
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    const result = await apiCall('/admin/admins/' + id + '/permissions', { method: 'PATCH', body: JSON.stringify({ permissions }) });
+    showToast(result.detachedFromTeam ? 'Permissions mises à jour — admin détaché de son équipe' : 'Permissions mises à jour');
+    closeModal('modal-admin-perms');
+    loadAdminTeam();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Enregistrer les permissions';
+  }
+}
+
+// ── Équipes admin ──────────────────────────────────────────────
+let _selectedTeamColor = '#f4720b';
+let _editingTeamId = null;
+
+function selectTeamColor(color, btn) {
+  _selectedTeamColor = color;
+  document.getElementById('team-color').value = color;
+  document.querySelectorAll('#team-color-picker button').forEach(b => b.style.border = '2px solid transparent');
+  btn.style.border = '2px solid white';
+}
+
+// Labels lisibles pour chaque section de permission
+// Source unique de vérité — ALL_SECTIONS et SECTION_LABELS sont synchronisés
+const SECTION_LABELS = Object.fromEntries(
+  ALL_SECTIONS.map(s => [s.key, s.label.replace(/^\S+\s/, '')])
+);
+
+let _cachedPresets = null;
+
+async function getPresets() {
+  if (_cachedPresets) return _cachedPresets;
+  const data = await apiCall('/admin/teams/presets');
+  _cachedPresets = data.presets || [];
+  return _cachedPresets;
+}
+
+function selectPreset(key, presets) {
+  document.getElementById('team-preset').value = key;
+
+  // Mettre en valeur le preset sélectionné
+  document.querySelectorAll('#team-preset-grid button').forEach(b => {
+    b.style.border = b.dataset.preset === key ? '2px solid var(--orange)' : '1px solid var(--border)';
+    b.style.background = b.dataset.preset === key ? 'rgba(244,114,11,0.08)' : 'var(--bg)';
+  });
+
+  const preset = presets.find(p => p.key === key);
+  if (!preset) return;
+
+  // Pré-remplir nom et description si vides
+  if (!document.getElementById('team-name').value) {
+    document.getElementById('team-name').value = preset.label;
+  }
+  if (!document.getElementById('team-description').value) {
+    document.getElementById('team-description').value = preset.description || '';
+  }
+
+  // Sélectionner la couleur du preset
+  const colorBtn = document.querySelector('#team-color-picker button[style*="' + preset.color + '"]');
+  if (colorBtn) colorBtn.click(); else selectTeamColor(preset.color, null);
+
+  // Afficher ou masquer les sections selon le type
+  const isCustom = key === 'custom';
+  document.getElementById('team-permissions-section').style.display  = isCustom ? 'block' : 'none';
+  document.getElementById('team-permissions-summary').style.display  = isCustom ? 'none'  : 'block';
+
+  if (!isCustom && preset.permissions) {
+    const summaryList = document.getElementById('team-permissions-summary-list');
+    summaryList.innerHTML = preset.permissions.map(p =>
+      '<span style="font-size:11px;padding:2px 8px;border-radius:20px;background:rgba(255,255,255,0.07);color:var(--white);border:1px solid var(--border);">'
+      + (SECTION_LABELS[p] || p) + '</span>'
+    ).join('');
+  }
+
+  document.getElementById('team-btn').disabled = false;
+}
+
+async function openCreateTeamModal() {
+  _editingTeamId = null;
+  document.getElementById('modal-team-title').textContent   = '👥 Créer une équipe';
+  document.getElementById('team-id').value                  = '';
+  document.getElementById('team-preset').value              = '';
+  document.getElementById('team-name').value                = '';
+  document.getElementById('team-description').value         = '';
+  document.getElementById('team-btn').textContent           = 'Créer l\'équipe';
+  document.getElementById('team-btn').disabled              = true;
+  document.getElementById('team-error').style.display       = 'none';
+  document.getElementById('team-preset-section').style.display     = 'block';
+  document.getElementById('team-permissions-section').style.display = 'none';
+  document.getElementById('team-permissions-summary').style.display = 'none';
+  document.querySelector('#team-color-picker button').click();
+
+  // Charger et afficher les presets
+  const presetGrid = document.getElementById('team-preset-grid');
+  presetGrid.innerHTML = '<div style="font-size:12px;color:var(--muted);">Chargement…</div>';
+  openModal('modal-team');
+
+  try {
+    const presets = await getPresets();
+    const icons = { verification:'🔍', support:'🎧', finance:'💰', moderation:'🛡️', commercial:'📈', custom:'⚙️' };
+    presetGrid.innerHTML = presets.map(p =>
+      '<button data-preset="' + p.key + '" onclick="selectPreset(\'' + p.key + '\',' + JSON.stringify(presets) + ')" '
+      + 'style="text-align:left;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--white);cursor:pointer;">'
+      + '<div style="font-size:16px;margin-bottom:4px;">' + (icons[p.key] || '👥') + '</div>'
+      + '<div style="font-size:12px;font-weight:700;">' + p.label + '</div>'
+      + '<div style="font-size:10px;color:var(--muted);margin-top:2px;line-height:1.3;">' + (p.description || '') + '</div>'
+      + '</button>'
+    ).join('');
+
+    // Construire la grille de permissions pour le mode custom
+    const allSections = Object.keys(SECTION_LABELS);
+    document.getElementById('team-permissions-grid').innerHTML = allSections.map(s =>
+      '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);">'
+      + '<input type="checkbox" data-section="' + s + '" style="accent-color:var(--orange);"> '
+      + (SECTION_LABELS[s] || s)
+      + '</label>'
+    ).join('');
+  } catch {
+    presetGrid.innerHTML = '<div style="font-size:12px;color:var(--red);">Erreur chargement</div>';
+  }
+}
+
+function openEditTeamModal(id, name, description, color, permissions) {
+  _editingTeamId = id;
+  document.getElementById('modal-team-title').textContent           = '✏️ Modifier l\'équipe';
+  document.getElementById('team-id').value                          = id;
+  document.getElementById('team-preset').value                      = 'custom';
+  document.getElementById('team-name').value                        = name;
+  document.getElementById('team-description').value                 = description || '';
+  document.getElementById('team-btn').textContent                   = 'Enregistrer';
+  document.getElementById('team-btn').disabled                      = false;
+  document.getElementById('team-error').style.display               = 'none';
+  document.getElementById('team-preset-section').style.display      = 'none';
+  document.getElementById('team-permissions-summary').style.display = 'none';
+
+  // Construire la grille de permissions avec état actuel
+  let currentPerms = [];
+  try { currentPerms = JSON.parse(permissions || '[]') || []; } catch {}
+  const allSections = Object.keys(SECTION_LABELS);
+  document.getElementById('team-permissions-grid').innerHTML = allSections.map(s =>
+    '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);">'
+    + '<input type="checkbox" data-section="' + s + '" ' + (currentPerms.includes(s) ? 'checked' : '') + ' style="accent-color:var(--orange);"> '
+    + (SECTION_LABELS[s] || s)
+    + '</label>'
+  ).join('');
+  document.getElementById('team-permissions-section').style.display = 'block';
+
+  const colorBtn = document.querySelector('#team-color-picker button[style*="' + (color || '#f4720b') + '"]');
+  if (colorBtn) colorBtn.click();
+  openModal('modal-team');
+}
+
+async function submitTeam() {
+  const name        = document.getElementById('team-name').value.trim();
+  const description = document.getElementById('team-description').value.trim();
+  const color       = document.getElementById('team-color').value;
+  const preset      = document.getElementById('team-preset').value;
+  const errEl       = document.getElementById('team-error');
+  const btn         = document.getElementById('team-btn');
+
+  errEl.style.display = 'none';
+  if (!name) { errEl.textContent = 'Le nom est requis'; errEl.style.display = 'block'; return; }
+  if (!_editingTeamId && !preset) { errEl.textContent = 'Choisissez un type d\'équipe'; errEl.style.display = 'block'; return; }
+
+  // Récupérer les permissions cochées (mode custom ou modification)
+  let permissions = null;
+  if (preset === 'custom' || _editingTeamId) {
+    const checked = [...document.querySelectorAll('#team-permissions-grid input[type=checkbox]:checked')];
+    permissions = checked.map(c => c.dataset.section);
+  }
+
+  btn.disabled = true;
+  const origLabel = btn.textContent;
+  btn.textContent = 'Enregistrement…';
+
+  try {
+    if (_editingTeamId) {
+      await apiCall('/admin/teams/' + _editingTeamId, {
+        method: 'PATCH',
+        body: JSON.stringify({ name, description, color, permissions }),
+      });
+      showToast('Équipe modifiée — permissions synchronisées');
+    } else {
+      await apiCall('/admin/teams', {
+        method: 'POST',
+        body: JSON.stringify({ name, description, color, preset, permissions }),
+      });
+      showToast('Équipe créée');
+    }
+    closeModal('modal-team');
+    loadAdminTeam();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = origLabel;
+  }
+}
+
+async function deleteTeam(id, name) {
+  if (!confirm('Supprimer l\'équipe "' + name + '" ? Les membres seront retirés de l\'équipe mais leurs comptes resteront actifs.')) return;
+  try {
+    await apiCall('/admin/teams/' + id, { method: 'DELETE' });
+    showToast('Équipe supprimée');
+    loadAdminTeam();
+  } catch (err) { showToast(err.message, true); }
+}
+
+let _assignTeamAdminId   = null;
+let _assignTeamSelected  = null; // { id, name, color, permissions } ou null
+
+async function openAssignTeamModal(adminId, adminName, currentTeamId) {
+  _assignTeamAdminId  = adminId;
+  _assignTeamSelected = null;
+
+  document.getElementById('assign-team-admin-name').textContent = adminName;
+  document.getElementById('assign-team-error').style.display    = 'none';
+  const listEl    = document.getElementById('assign-team-list');
+  const previewEl = document.getElementById('assign-team-preview');
+  const confirmEl = document.getElementById('assign-team-confirm');
+  if (previewEl)  previewEl.style.display  = 'none';
+  if (confirmEl)  confirmEl.style.display  = 'none';
+  listEl.innerHTML = '<div style="font-size:12px;color:var(--muted);">Chargement…</div>';
+  openModal('modal-assign-team');
+
+  try {
+    const data  = await apiCall('/admin/teams');
+    const teams = data.teams || [];
+
+    let html = '';
+
+    // Option "Aucune équipe"
+    const noTeamActive = !currentTeamId;
+    html += '<button onclick="selectTeamForAssign(null)"'
+      + ' style="width:100%;text-align:left;padding:10px 14px;border-radius:10px;border:1px solid '
+      + (noTeamActive ? 'var(--orange)' : 'var(--border)')
+      + ';background:' + (noTeamActive ? 'rgba(244,114,11,0.08)' : 'var(--bg)')
+      + ';color:var(--white);cursor:pointer;display:flex;align-items:center;gap:10px;">'
+      + '<div style="width:10px;height:10px;border-radius:50%;background:var(--muted);flex-shrink:0;"></div>'
+      + '<div style="flex:1;">'
+      + '<div style="font-size:13px;font-weight:600;">Aucune équipe</div>'
+      + '<div style="font-size:11px;color:var(--muted);margin-top:1px;">Retire l\'admin de son équipe — accès total par défaut</div>'
+      + '</div>'
+      + (noTeamActive ? '<span style="font-size:11px;color:var(--orange);">✓ Actuel</span>' : '')
+      + '</button>';
+
+    if (teams.length === 0) {
+      html += '<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px;">Aucune équipe créée</div>';
+    } else {
+      for (const t of teams) {
+        const c      = t.color || '#f4720b';
+        const active = t.id === currentTeamId;
+        let perms = [];
+        try { perms = JSON.parse(t.permissions || '[]') || []; } catch {}
+        const permsPreview = perms.length > 0
+          ? perms.slice(0, 3).map(p => '<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:' + c + '22;color:' + c + ';">' + (SECTION_LABELS[p] || p) + '</span>').join(' ')
+            + (perms.length > 3 ? '<span style="font-size:10px;color:var(--muted);"> +' + (perms.length - 3) + '</span>' : '')
+          : '<span style="font-size:10px;color:var(--green);">Accès total</span>';
+
+        html += '<button onclick="selectTeamForAssign(' + JSON.stringify({ id: t.id, name: t.name, color: c, permissions: t.permissions || null }) + ')"'
+          + ' style="width:100%;text-align:left;padding:10px 14px;border-radius:10px;border:1px solid '
+          + (active ? c : 'var(--border)')
+          + ';background:' + (active ? c + '18' : 'var(--bg)')
+          + ';color:var(--white);cursor:pointer;display:flex;align-items:center;gap:10px;">'
+          + '<div style="width:10px;height:10px;border-radius:50%;background:' + c + ';flex-shrink:0;"></div>'
+          + '<div style="flex:1;">'
+          + '<div style="font-size:13px;font-weight:600;">' + escHtml(t.name) + '</div>'
+          + (t.description ? '<div style="font-size:11px;color:var(--muted);margin-top:1px;">' + escHtml(t.description) + '</div>' : '')
+          + '<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:3px;">' + permsPreview + '</div>'
+          + '</div>'
+          + (active ? '<span style="font-size:11px;color:' + c + ';">✓ Actuel</span>' : '')
+          + '</button>';
+      }
+    }
+    listEl.innerHTML = html;
+  } catch (err) {
+    listEl.innerHTML = '<div style="font-size:12px;color:var(--red);">Erreur : ' + escHtml(err.message) + '</div>';
+  }
+}
+
+function selectTeamForAssign(team) {
+  _assignTeamSelected = team; // null = retrait
+
+  const previewEl = document.getElementById('assign-team-preview');
+  const confirmEl = document.getElementById('assign-team-confirm');
+  const errEl     = document.getElementById('assign-team-error');
+  errEl.style.display = 'none';
+
+  if (!previewEl || !confirmEl) {
+    // Fallback : confirmer directement
+    submitAssignTeam();
+    return;
+  }
+
+  if (!team) {
+    previewEl.innerHTML = '<div style="font-size:12px;color:var(--muted);">L\'admin sera retiré de son équipe. Ses permissions seront effacées (accès total par défaut).</div>';
+  } else {
+    let perms = [];
+    try { perms = JSON.parse(team.permissions || '[]') || []; } catch {}
+    const c = team.color || '#f4720b';
+    const permsHtml = perms.length > 0
+      ? perms.map(p => '<span style="font-size:11px;padding:2px 8px;border-radius:20px;background:' + c + '22;color:' + c + ';border:1px solid ' + c + '44;">' + (SECTION_LABELS[p] || p) + '</span>').join(' ')
+      : '<span style="font-size:12px;color:var(--green);">Accès total à toutes les sections</span>';
+
+    previewEl.innerHTML = '<div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Accès qui seront accordés</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:5px;">' + permsHtml + '</div>';
+  }
+
+  previewEl.style.display  = 'block';
+  confirmEl.style.display  = 'block';
+}
+
+async function submitAssignTeam() {
+  if (!_assignTeamAdminId) return;
+  const teamId = _assignTeamSelected ? _assignTeamSelected.id : null;
+  const errEl  = document.getElementById('assign-team-error');
+  const btn    = document.getElementById('assign-team-confirm-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
+
+  try {
+    await apiCall('/admin/admins/' + _assignTeamAdminId + '/team', {
+      method: 'PATCH',
+      body: JSON.stringify({ teamId }),
+    });
+    showToast(teamId ? 'Équipe assignée — permissions synchronisées' : 'Admin retiré de l\'équipe');
+    closeModal('modal-assign-team');
+    loadAdminTeam();
+  } catch (err) {
+    errEl.textContent    = err.message;
+    errEl.style.display  = 'block';
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirmer'; }
+  }
+}
+
+async function loadAdminTeams() {
+  try {
+    const data   = await apiCall('/admin/teams');
+    const teams  = data.teams || [];
+    const grid   = document.getElementById('admin-teams-grid');
+    const emptyEl = document.getElementById('admin-teams-empty');
+    if (!grid) return;
+
+    if (teams.length === 0) {
+      grid.innerHTML   = '';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    grid.innerHTML = teams.map(t => {
+      const c = t.color || '#f4720b';
+      let perms = [];
+      try { perms = JSON.parse(t.permissions || '[]') || []; } catch {}
+      const permsHtml = perms.length > 0
+        ? perms.slice(0, 3).map(p => '<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:' + c + '22;color:' + c + ';border:1px solid ' + c + '44;">' + (SECTION_LABELS[p] || p) + '</span>').join(' ')
+          + (perms.length > 3 ? '<span style="font-size:10px;color:var(--muted);">+' + (perms.length - 3) + '</span>' : '')
+        : '<span style="font-size:10px;color:var(--green);">Accès total</span>';
+
+      return '<div style="background:var(--card);border:1px solid ' + c + '44;border-radius:12px;padding:12px 16px;min-width:200px;position:relative;">'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+        + '<div style="width:10px;height:10px;border-radius:50%;background:' + c + ';flex-shrink:0;"></div>'
+        + '<strong style="font-size:13px;">' + escHtml(t.name) + '</strong>'
+        + '</div>'
+        + (t.description ? '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">' + escHtml(t.description) + '</div>' : '')
+        + '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">' + t.memberCount + ' membre' + (t.memberCount !== 1 ? 's' : '') + '</div>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">' + permsHtml + '</div>'
+        + '<div style="display:flex;gap:6px;margin-top:4px;">'
+        + '<button class="btn btn-view" style="font-size:10px;padding:3px 8px;" onclick="openEditTeamModal(\'' + escAttr(t.id) + '\',\'' + escAttr(t.name) + '\',\'' + escAttr(t.description||'') + '\',\'' + (t.color||'') + '\',' + JSON.stringify(t.permissions||null) + ')">✏️ Modifier</button>'
+        + '<button class="btn btn-reject" style="font-size:10px;padding:3px 8px;" onclick="deleteTeam(\'' + escAttr(t.id) + '\',\'' + escAttr(t.name) + '\')">🗑</button>'
+        + '</div>'
+        + '</div>';
+    }).join('');
+  } catch {}
+}
+
+async function saveSecurityQuestion() {
+  const currentPassword = document.getElementById('sq-current-password').value;
+  const question        = document.getElementById('sq-question').value.trim();
+  const answer          = document.getElementById('sq-answer').value.trim();
+  const errEl           = document.getElementById('sq-error');
+  const btn             = document.getElementById('sq-btn');
+
+  errEl.style.display = 'none';
+  if (!currentPassword || !question || !answer) {
+    errEl.textContent = 'Tous les champs sont requis';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Enregistrement...';
+  try {
+    await apiCall('/admin/me/security-setup', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, question, answer }),
+    });
+    showToast('Question secrète enregistrée');
+    document.getElementById('sq-current-password').value = '';
+    document.getElementById('sq-answer').value = '';
+    loadAdminTeam();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Enregistrer la question';
+  }
+}
+
+async function changeAdminPassword() {
+  const currentPassword  = document.getElementById('cp-current-password').value;
+  const securityAnswer   = document.getElementById('cp-security-answer').value.trim();
+  const newPassword      = document.getElementById('cp-new-password').value;
+  const confirmPassword  = document.getElementById('cp-confirm-password').value;
+  const errEl            = document.getElementById('cp-error');
+  const btn              = document.getElementById('cp-btn');
+
+  errEl.style.display = 'none';
+  if (!currentPassword || !securityAnswer || !newPassword || !confirmPassword) {
+    errEl.textContent = 'Tous les champs sont requis';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    errEl.textContent = 'Les deux nouveaux mots de passe ne correspondent pas';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (newPassword.length < 8) {
+    errEl.textContent = 'Le nouveau mot de passe doit contenir au moins 8 caractères';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = 'Vérification...';
+  try {
+    await apiCall('/admin/me/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, securityAnswer, newPassword }),
+    });
+    showToast('Mot de passe modifié avec succès');
+    ['cp-current-password','cp-security-answer','cp-new-password','cp-confirm-password'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Changer le mot de passe';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // CRÉER UN ADMIN
 // ══════════════════════════════════════════════════════════════
 function resetCreateAdminForm() {
@@ -3802,6 +5272,7 @@ async function submitCreateAdmin() {
     });
     showToast('Compte administrateur créé avec succès');
     resetCreateAdminForm();
+    setTimeout(() => showPage('admin-team', null), 800);
   } catch (err) {
     errEl.textContent = err.message;
     errEl.style.display = 'block';
@@ -3821,15 +5292,47 @@ async function submitCreateAdmin() {
     _adminUser = user;
     document.getElementById('admin-name').textContent = ((user.firstName || '') + ' ' + (user.lastName || '')).trim();
     document.getElementById('admin-email').textContent = user.email || '';
+
+    // Affichage niveau + masquage des sections super-only pour les admins STANDARD
+    const isSuperAdmin = user.adminLevel === 'SUPER';
+    const badge = document.getElementById('admin-level-badge');
+    if (isSuperAdmin) {
+      badge.textContent = '⭐ SUPER ADMIN';
+      badge.style.display = 'inline-block';
+    } else {
+      badge.textContent = 'ADMIN';
+      badge.style.display = 'inline-block';
+      badge.style.background = 'rgba(107,114,128,0.15)';
+      badge.style.color = 'var(--muted)';
+      // Masquer les entrées nav réservées au super admin
+      document.querySelectorAll('[data-super-only]').forEach(el => { el.style.display = 'none'; });
+
+      // Permissions granulaires : masquer les sections non autorisées
+      if (user.adminPermissions) {
+        let allowed = [];
+        try { allowed = JSON.parse(user.adminPermissions); } catch {}
+        if (Array.isArray(allowed)) {
+          document.querySelectorAll('[data-section]').forEach(el => {
+            const section = el.getAttribute('data-section');
+            if (!allowed.includes(section)) el.style.display = 'none';
+          });
+          // Stocker pour bloquer showPage()
+          window._adminAllowedSections = allowed;
+        }
+      }
+    }
   } catch {
-    window.location.href = '/admin/login.html';
+    window.location.href = window.location.pathname.replace(/\/[^/]*$/, '') + '/login.html';
     return;
   }
   loadDashboard();
-  loadModerationStats();
   loadDisputeStats();
   loadSecurityStats();
   loadReviewStats();
+
+  // Alertes temps réel : 1er appel immédiat puis toutes les 60s
+  refreshAlerts();
+  setInterval(refreshAlerts, 60 * 1000);
 })();
 
 // ══════════════════════════════════════════════════════════════
@@ -4579,7 +6082,7 @@ async function loadMsgThread(userA, userB, page) {
   if (page < 1) return;
   msgThreadPage = page;
   try {
-    const d = await apiCall(`/api/admin/messaging/conversations/${encodeURIComponent(userA)}/${encodeURIComponent(userB)}?page=${page}`);
+    const d = await apiCall(`/admin/messaging/conversations/${encodeURIComponent(userA)}/${encodeURIComponent(userB)}?page=${page}`);
     const body = document.getElementById('msg-thread-body');
     body.innerHTML = '';
 
@@ -4620,7 +6123,7 @@ async function loadMsgThread(userA, userB, page) {
 async function deleteMsgAdmin(msgId) {
   if (!confirm('Supprimer ce message définitivement ?')) return;
   try {
-    await apiCall(`/api/admin/messaging/messages/${encodeURIComponent(msgId)}`, { method: 'DELETE' });
+    await apiCall(`/admin/messaging/messages/${encodeURIComponent(msgId)}`, { method: 'DELETE' });
     showToast('Message supprimé');
     loadMsgThread(msgThreadUserA, msgThreadUserB, msgThreadPage);
     loadMsgConversations(msgConvPage);
@@ -5301,5 +6804,170 @@ async function removeMember(companyId, memberId, memberName) {
     loadCompanyStats();
   } catch(e) {
     showToast('Erreur : ' + e.message, true);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// ALERTES TEMPS RÉEL
+// ══════════════════════════════════════════════════════════════
+
+async function refreshAlerts() {
+  try {
+    const data   = await apiCall('/admin/alerts');
+    const alerts = data.alerts || [];
+    const badge  = document.getElementById('alerts-badge');
+    const btn    = document.getElementById('alerts-btn');
+    if (!badge) return;
+
+    if (alerts.length > 0) {
+      badge.textContent    = alerts.length > 9 ? '9+' : String(alerts.length);
+      badge.style.display  = 'inline-block';
+      btn.style.color      = '#ef4444';
+    } else {
+      badge.style.display  = 'none';
+      btn.style.color      = '';
+    }
+
+    const countEl = document.getElementById('alerts-panel-count');
+    if (countEl) countEl.textContent = alerts.length + ' alerte' + (alerts.length !== 1 ? 's' : '');
+
+    const listEl = document.getElementById('alerts-panel-list');
+    if (!listEl) return;
+
+    if (alerts.length === 0) {
+      listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px;">✅ Aucune alerte en cours</div>';
+      return;
+    }
+
+    listEl.innerHTML = alerts.map(a => {
+      const dot = a.level === 'urgent' ? '#ef4444' : '#f4720b';
+      return '<div style="padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:10px;" onclick="closeAlertsPanel();showPage(\'' + a.page + '\',null)">'
+        + '<div style="width:8px;height:8px;border-radius:50%;background:' + dot + ';flex-shrink:0;"></div>'
+        + '<div><div style="font-size:13px;font-weight:600;">' + escHtml(a.label) + '</div>'
+        + '<div style="font-size:11px;color:var(--muted);margin-top:2px;">' + (a.level === 'urgent' ? '⚠️ Urgent' : '⏳ Attention') + '</div></div>'
+        + '</div>';
+    }).join('');
+  } catch {}
+}
+
+function toggleAlertsPanel() {
+  const panel = document.getElementById('alerts-panel');
+  if (!panel) return;
+  if (panel.style.display !== 'none') {
+    panel.style.display = 'none';
+  } else {
+    panel.style.display = 'block';
+    refreshAlerts();
+  }
+}
+
+function closeAlertsPanel() {
+  const panel = document.getElementById('alerts-panel');
+  if (panel) panel.style.display = 'none';
+}
+
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('alerts-btn-wrap');
+  if (wrap && !wrap.contains(e.target)) closeAlertsPanel();
+});
+
+// ══════════════════════════════════════════════════════════════
+// JOURNAL D'ACTIONS ADMIN
+// ══════════════════════════════════════════════════════════════
+
+let adminLogsDebounceTimer = null;
+function debounceAdminLogs() {
+  clearTimeout(adminLogsDebounceTimer);
+  adminLogsDebounceTimer = setTimeout(() => loadAdminLogs(1), 400);
+}
+
+const ACTION_LABELS = {
+  USER_SUSPEND:      { label: 'Suspension utilisateur',       badge: 'badge-yellow' },
+  USER_REACTIVATE:   { label: 'Réactivation utilisateur',     badge: 'badge-green'  },
+  USER_DELETE:       { label: 'Suppression utilisateur',      badge: 'badge-red'    },
+  PRO_VERIFY:        { label: 'Vérification identité ✓',      badge: 'badge-green'  },
+  PRO_REJECT:        { label: 'Rejet identité',               badge: 'badge-red'    },
+  ADMIN_SUSPEND:     { label: 'Suspension admin',             badge: 'badge-yellow' },
+  ADMIN_REACTIVATE:  { label: 'Réactivation admin',           badge: 'badge-green'  },
+  ADMIN_DELETE:      { label: 'Suppression admin',            badge: 'badge-red'    },
+};
+
+async function loadAdminLogs(page) {
+  const tbody    = document.getElementById('admin-logs-tbody');
+  const emptyEl  = document.getElementById('admin-logs-empty');
+  const paginEl  = document.getElementById('admin-logs-pagination');
+  if (!tbody) return;
+
+  const action   = (document.getElementById('log-filter-action')?.value || '').trim();
+  const adminId  = document.getElementById('log-filter-admin')?.value  || '';
+  const dateFrom = document.getElementById('log-date-from')?.value     || '';
+  const dateTo   = document.getElementById('log-date-to')?.value       || '';
+
+  let url = '/admin/admin-logs?page=' + page + '&limit=30';
+  if (action)   url += '&action='   + encodeURIComponent(action);
+  if (adminId)  url += '&adminId='  + encodeURIComponent(adminId);
+  if (dateFrom) url += '&dateFrom=' + encodeURIComponent(dateFrom);
+  if (dateTo)   url += '&dateTo='   + encodeURIComponent(dateTo);
+
+  try {
+    const data = await apiCall(url);
+    const logs = data.logs || [];
+
+    // Peupler le filtre admin si vide
+    const adminSelect = document.getElementById('log-filter-admin');
+    if (adminSelect && adminSelect.options.length <= 1) {
+      const adminsData = await apiCall('/admin/admins').catch(() => ({ admins: [] }));
+      (adminsData.admins || []).forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.firstName + ' ' + a.lastName;
+        adminSelect.appendChild(opt);
+      });
+    }
+
+    if (logs.length === 0) {
+      tbody.innerHTML = '';
+      emptyEl.style.display = '';
+      paginEl.innerHTML = '';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    tbody.innerHTML = logs.map(l => {
+      const adminName = l.admin ? escHtml(l.admin.firstName + ' ' + l.admin.lastName) : escHtml(l.adminId.substring(0, 8));
+      const info      = ACTION_LABELS[l.action] || { label: escHtml(l.action), badge: 'badge-muted' };
+      const meta      = l.metadata ? (() => { try { return JSON.parse(l.metadata); } catch { return {}; } })() : {};
+      const metaStr   = Object.keys(meta).length > 0
+        ? '<span style="font-size:11px;color:var(--muted);">' + Object.entries(meta).map(([k,v]) => escHtml(k) + ': ' + escHtml(String(v))).join(' · ') + '</span>'
+        : '—';
+      const targetStr = l.targetType && l.targetId
+        ? '<span style="font-size:11px;color:var(--muted);">' + escHtml(l.targetType) + '</span><br><code style="font-size:10px;color:var(--muted);">' + escHtml(l.targetId.substring(0, 12)) + '…</code>'
+        : '—';
+
+      return '<tr>'
+        + '<td style="white-space:nowrap;font-size:12px;">' + new Date(l.createdAt).toLocaleString('fr-FR') + '</td>'
+        + '<td><strong style="font-size:13px;">' + adminName + '</strong></td>'
+        + '<td><span class="badge ' + info.badge + '">' + info.label + '</span></td>'
+        + '<td>' + targetStr + '</td>'
+        + '<td style="font-size:11px;color:var(--muted);">' + escHtml(l.ipAddress || '—') + '</td>'
+        + '<td>' + metaStr + '</td>'
+        + '</tr>';
+    }).join('');
+
+    // Pagination
+    const totalPages = data.totalPages || 1;
+    paginEl.innerHTML = '';
+    if (totalPages > 1) {
+      for (let i = 1; i <= totalPages; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'btn ' + (i === page ? 'btn-approve' : 'btn-view');
+        btn.style.cssText = 'padding:6px 12px;font-size:12px;';
+        btn.textContent = i;
+        btn.onclick = () => loadAdminLogs(i);
+        paginEl.appendChild(btn);
+      }
+    }
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--red);padding:20px;">Erreur : ' + escHtml(err.message) + '</td></tr>';
   }
 }

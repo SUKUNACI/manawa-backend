@@ -108,6 +108,23 @@ async function getPawapayProviders(country = null) {
   }
 }
 
+// Initier un remboursement GeniusPay
+async function refundPayment(reference, amount, reason) {
+  try {
+    const response = await client.post(`/payments/${reference}/refund`, {
+      amount,
+      currency: 'XOF',
+      reason: reason || 'Remboursement client MANAWA',
+    });
+    return response.data;
+  } catch (err) {
+    const status = err.response?.status;
+    const data   = err.response?.data;
+    console.error('[GeniusPay] refundPayment error — status:', status, 'data:', JSON.stringify(data), 'msg:', err.message);
+    throw err;
+  }
+}
+
 // Vérifier la signature d'un webhook
 function verifyWebhookSignature(signature, timestamp, payload) {
   if (!WEBHOOK_SECRET) {
@@ -142,6 +159,7 @@ module.exports = {
   getAccountInfo,
   getAccountBalance,
   getPawapayProviders,
+  refundPayment,
   verifyWebhookSignature,
   verifyWebhookTimestamp,
 };

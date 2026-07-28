@@ -30,6 +30,12 @@ model User {
   phoneOtpExpiry      DateTime?
   phoneVerified       Boolean         @default(false)
   suspended           Boolean         @default(false)
+  adminLevel          String?
+  adminPermissions    String?         // JSON : tableau de sections autorisées, null = accès total
+  adminTeamId         String?
+  lastLoginAt         DateTime?
+  securityQuestion    String?
+  securityAnswerHash  String?
   expoPushToken       String?
   deletedAt           DateTime?
   follows             Follow[]
@@ -299,6 +305,13 @@ model Payment {
   updatedAt       DateTime           @updatedAt
   completedAt     DateTime?
   commissionPaid  Boolean            @default(false)
+  bankRef         String?
+  reconciledAt    DateTime?
+  reconciledBy    String?
+  refundAmount    Float?
+  refundedAt      DateTime?
+  refundRef       String?
+  refundNote      String?
   quote           Quote              @relation(fields: [quoteId], references: [id])
   auditLogs       PaymentAuditLog[]
   disputes        Dispute[]
@@ -347,15 +360,19 @@ model Review {
 }
 
 model SupportTicket {
-  id        String           @id @default(uuid())
-  userId    String
-  category  String
-  subject   String
-  status    String           @default("OPEN")
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  messages  SupportMessage[]
-  user      User             @relation(fields: [userId], references: [id])
+  id               String           @id @default(uuid())
+  userId           String
+  category         String
+  subject          String
+  status           String           @default("OPEN")
+  priority         String           @default("NORMAL") // LOW | NORMAL | HIGH | URGENT
+  assignedTo       String?
+  firstResponseAt  DateTime?
+  resolvedAt       DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  messages         SupportMessage[]
+  user             User             @relation(fields: [userId], references: [id])
 }
 
 model SupportMessage {
@@ -378,6 +395,32 @@ model CompanyMember {
   member    Professional @relation("MemberOf", fields: [memberId], references: [id])
 
   @@unique([companyId, memberId])
+}
+
+model AdminTeam {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  color       String?
+  permissions String?  // JSON : tableau de sections autorisées, null = accès total
+  preset      String?  // slug prédéfini : verification | support | finance | moderation | commercial | custom
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AdminLog {
+  id         String   @id @default(uuid())
+  adminId    String
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   String?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([adminId])
+  @@index([createdAt])
 }
 
 enum UserRole {

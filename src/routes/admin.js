@@ -1240,9 +1240,7 @@ router.post('/users/:id/reset-password', async (req, res, next) => {
 
     await writeAdminLog(req, 'USER_RESET_PASSWORD', 'User', req.params.id);
 
-    // Le mot de passe temporaire n'est jamais retourné dans la réponse HTTP
-    // À transmettre à l'utilisateur via email ou SMS hors-bande
-    res.json({ message: 'Mot de passe réinitialisé avec succès. Transmettez le nouveau mot de passe à l\'utilisateur via email ou SMS.' });
+    res.json({ message: 'Mot de passe réinitialisé avec succès.', temporaryPassword: tempPassword });
   } catch (err) {
     next(err);
   }

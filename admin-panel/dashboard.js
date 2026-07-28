@@ -3306,7 +3306,7 @@ async function submitAddIp() {
   if (!ip) { errEl.textContent = 'L\'adresse IP est requise'; errEl.style.display = ''; return; }
 
   try {
-    await apiCall('/admin/security/allowed-ips', 'POST', { ip, label });
+    await apiCall('/admin/security/allowed-ips', { method: 'POST', body: JSON.stringify({ ip, label }) });
     closeModal('modal-add-ip');
     showToast('IP ajoutée avec succès');
     loadAllowedIPs();
@@ -3319,7 +3319,7 @@ async function submitAddIp() {
 async function removeIP(ip) {
   if (!confirm('Supprimer l\'IP ' + ip + ' de la liste des accès autorisés ?')) return;
   try {
-    await apiCall('/admin/security/allowed-ips/' + encodeURIComponent(ip), 'DELETE');
+    await apiCall('/admin/security/allowed-ips/' + encodeURIComponent(ip), { method: 'DELETE' });
     showToast('IP supprimée');
     loadAllowedIPs();
   } catch (err) {
@@ -4093,12 +4093,20 @@ async function setTicketPriority(ticketId, priority) {
 async function openSupportTicket(ticketId) {
   try {
     currentSupportTicketId = ticketId;
-    const data = await apiCall('/admin/support/tickets/' + ticketId);
+    const [data, admins] = await Promise.all([
+      apiCall('/admin/support/tickets/' + ticketId),
+      apiCall('/admin/admins').catch(() => []),
+    ]);
     document.getElementById('support-modal-title').textContent = data.subject;
 
     // Status select
     const sel = document.getElementById('support-modal-status');
     sel.innerHTML = Object.entries(SUPPORT_STATUS).map(([k, v]) => '<option value="' + k + '"' + (data.status === k ? ' selected' : '') + '>' + v.label + '</option>').join('');
+
+    // Assign select
+    const assignSel = document.getElementById('support-modal-assign');
+    assignSel.innerHTML = '<option value="">— Non assigné —</option>'
+      + (admins || []).map(a => '<option value="' + a.id + '"' + (data.assignedTo === a.id ? ' selected' : '') + '>' + escHtml((a.firstName || '') + ' ' + (a.lastName || '')) + '</option>').join('');
 
     // Messages
     const msgEl = document.getElementById('support-modal-messages');
@@ -4139,6 +4147,18 @@ async function changeSupportStatus() {
   try {
     await apiCall('/admin/support/tickets/' + currentSupportTicketId + '/status', { method: 'PATCH', body: JSON.stringify({ status }) });
     showToast('Statut mis à jour');
+    loadSupportTickets();
+  } catch (err) {
+    showToast('Erreur: ' + err.message, true);
+  }
+}
+
+async function assignSupportTicket() {
+  if (!currentSupportTicketId) return;
+  const assignedTo = document.getElementById('support-modal-assign').value || null;
+  try {
+    await apiCall('/admin/support/tickets/' + currentSupportTicketId + '/assign', { method: 'PATCH', body: JSON.stringify({ assignedTo }) });
+    showToast(assignedTo ? 'Ticket assigné' : 'Assignation retirée');
     loadSupportTickets();
   } catch (err) {
     showToast('Erreur: ' + err.message, true);
@@ -6595,25 +6615,14 @@ async function openPortfolioModal(projectId) {
   }
 }
 
-async function deletePortfolioProject() {
-  const id = _currentPfProjectId;
+async function deletePortfolioProject(idOverride, title) {
+  const id = idOverride || _currentPfProjectId;
   if (!id) return;
-  if (!confirm('Supprimer cette réalisation et toutes ses photos / commentaires ?')) return;
+  const msg = title ? 'Supprimer la réalisation "' + title + '" ?' : 'Supprimer cette réalisation et toutes ses photos / commentaires ?';
+  if (!confirm(msg)) return;
   try {
     await apiCall('/admin/portfolio/projects/' + id, { method: 'DELETE' });
-    closeModal('modal-portfolio-project');
-    showToast('Réalisation supprimée');
-    loadPortfolioProjects(pfCurrentPage);
-    loadPortfolioStats();
-  } catch(e) {
-    showToast('Erreur : ' + e.message, true);
-  }
-}
-
-async function confirmDeletePortfolio(id, title) {
-  if (!confirm('Supprimer la réalisation "' + title + '" ?')) return;
-  try {
-    await apiCall('/admin/portfolio/projects/' + id, { method: 'DELETE' });
+    if (!idOverride) closeModal('modal-portfolio-project');
     showToast('Réalisation supprimée');
     loadPortfolioProjects(pfCurrentPage);
     loadPortfolioStats();

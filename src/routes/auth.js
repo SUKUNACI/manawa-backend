@@ -49,8 +49,8 @@ router.post(
   [
     body('email').isEmail(),
     body('password').isLength({ min: 8 }),
-    body('firstName').notEmpty().trim().escape(),
-    body('lastName').notEmpty().trim().escape(),
+    body('firstName').notEmpty().trim().matches(/^[^<>&"'/\\]+$/).withMessage('Prénom invalide'),
+    body('lastName').notEmpty().trim().matches(/^[^<>&"'/\\]+$/).withMessage('Nom invalide'),
     body('role').isIn(['CLIENT', 'PROFESSIONAL']),
   ],
   async (req, res, next) => {

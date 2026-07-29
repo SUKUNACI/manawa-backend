@@ -12,8 +12,8 @@ const router = express.Router();
 router.patch('/me',
   requireAuth,
   [
-    body('firstName').optional().trim().notEmpty().isLength({ max: 50 }).escape(),
-    body('lastName').optional().trim().notEmpty().isLength({ max: 50 }).escape(),
+    body('firstName').optional().trim().notEmpty().isLength({ max: 50 }).matches(/^[^<>&"'/\\]+$/).withMessage('Prénom invalide'),
+    body('lastName').optional().trim().notEmpty().isLength({ max: 50 }).matches(/^[^<>&"'/\\]+$/).withMessage('Nom invalide'),
     body('phone').optional({ nullable: true }).trim().matches(/^\+?[0-9\s\-().]{6,20}$/),
     body('city').optional({ nullable: true }).trim().isLength({ max: 100 }).escape(),
   ],

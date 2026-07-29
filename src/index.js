@@ -66,7 +66,7 @@ app.use((req, res, next) => {
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com"],
           imgSrc: ["'self'", "data:", "https://*.openstreetmap.org", "https://unpkg.com", "https://*.tile.openstreetmap.org"],
-          connectSrc: ["'self'", "https://api.ipify.org"],
+          connectSrc: ["'self'", "https://api.ipify.org", "https://unpkg.com"],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],
           formAction: ["'self'"],

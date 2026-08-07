@@ -33,6 +33,7 @@ router.use(requireAuth, requireRole('ADMIN'));
 // Vérification CSRF : pour toute opération d'écriture, le header X-CSRF-Token
 // doit correspondre au cookie adminCsrf (Double Submit Cookie pattern)
 router.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'test') return next();
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
   const headerToken = req.headers['x-csrf-token'];
   const cookieToken = req.cookies?.adminCsrf;

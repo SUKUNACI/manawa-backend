@@ -158,8 +158,8 @@ const PRO_ID    = 'pro-1';
 const USER_ID   = 'user-pro-1';
 const CLIENT_ID = 'client-1';
 
-const mockAdminUser = { id: ADMIN_ID, role: 'ADMIN', email: 'admin@test.com', suspended: false };
-const mockProUser   = { id: USER_ID,  role: 'PROFESSIONAL', email: 'pro@test.com', suspended: false };
+const mockAdminUser = { id: ADMIN_ID, role: 'ADMIN', email: 'admin@test.com', suspended: false, adminLevel: 'SUPER', adminPermissions: null };
+const mockProUser   = { id: USER_ID,  role: 'PROFESSIONAL', email: 'pro@test.com', suspended: false, adminLevel: null, adminPermissions: null };
 
 const mockProfessional = {
   id: PRO_ID, userId: USER_ID, trade: 'Maçon', identityStatus: 'PENDING',

@@ -3,10 +3,13 @@ const express = require('express');
 const { proToken, clientToken } = require('./helpers');
 
 jest.mock('../src/config/db', () => ({
-  user: { findUnique: jest.fn() },
+  user:         { findUnique: jest.fn() },
+  professional: { findUnique: jest.fn() },
+  quote:        { findFirst: jest.fn().mockResolvedValue(null) },
   message: {
     create:     jest.fn(),
     findMany:   jest.fn().mockResolvedValue([]),
+    findFirst:  jest.fn(),
     count:      jest.fn().mockResolvedValue(0),
     updateMany: jest.fn().mockResolvedValue({ count: 0 }),
   },
@@ -15,6 +18,7 @@ jest.mock('../src/config/db', () => ({
 
 const prisma = require('../src/config/db');
 const messageRoutes = require('../src/routes/messages');
+
 
 const app = express();
 app.use(express.json());
@@ -33,13 +37,18 @@ function useB() { prisma.user.findUnique.mockResolvedValue(mockUserB); }
 
 describe('POST /api/messages', () => {
   beforeEach(() => {
-    useA();
     prisma.message.create.mockResolvedValue({
       id: 'msg-1', senderId: USER_A, receiverId: USER_B, content: 'Bonjour', createdAt: new Date(),
     });
+    // requireAuth → requireEmailVerified → receiver lookup → professional lookup → sender lookup
     prisma.user.findUnique
-      .mockResolvedValueOnce(mockUserA)  // requireAuth
-      .mockResolvedValueOnce({ id: USER_A, firstName: 'Alice', lastName: 'Durand' }); // sender lookup
+      .mockResolvedValueOnce(mockUserA)                                                // requireAuth
+      .mockResolvedValueOnce({ ...mockUserA, emailVerified: true })                    // requireEmailVerified
+      .mockResolvedValueOnce(mockUserB)                                                // receiver check
+      .mockResolvedValueOnce({ id: USER_A, firstName: 'Alice', lastName: 'Durand' }); // sender for notification
+    prisma.professional.findUnique.mockResolvedValue({ id: 'pro-b' });
+    prisma.quote.findFirst.mockResolvedValue(null);
+    prisma.message.findFirst.mockResolvedValue({ id: 'existing-msg' }); // existing conversation
   });
 
   test('crée un message et retourne 201', async () => {
@@ -56,7 +65,10 @@ describe('POST /api/messages', () => {
   });
 
   test('400 si receiverId manquant', async () => {
-    prisma.user.findUnique.mockResolvedValue(mockUserA);
+    prisma.user.findUnique.mockReset();
+    prisma.user.findUnique
+      .mockResolvedValueOnce(mockUserA)
+      .mockResolvedValueOnce({ ...mockUserA, emailVerified: true });
     const res = await request(app)
       .post('/api/messages')
       .set('Authorization', `Bearer ${clientToken(USER_A)}`)
@@ -66,7 +78,10 @@ describe('POST /api/messages', () => {
   });
 
   test('400 si content vide', async () => {
-    prisma.user.findUnique.mockResolvedValue(mockUserA);
+    prisma.user.findUnique.mockReset();
+    prisma.user.findUnique
+      .mockResolvedValueOnce(mockUserA)
+      .mockResolvedValueOnce({ ...mockUserA, emailVerified: true });
     const res = await request(app)
       .post('/api/messages')
       .set('Authorization', `Bearer ${clientToken(USER_A)}`)
@@ -84,7 +99,10 @@ describe('POST /api/messages', () => {
 // ══ GET /api/messages/conversations ════════════════════════════════════════
 
 describe('GET /api/messages/conversations', () => {
-  beforeEach(() => useA());
+  beforeEach(() => {
+    prisma.user.findUnique.mockReset();
+    useA();
+  });
 
   test('retourne 200 avec liste vide', async () => {
     prisma.message.findMany.mockResolvedValue([]);
@@ -144,6 +162,7 @@ describe('GET /api/messages/unread-count', () => {
 
 describe('GET /api/messages/:userId', () => {
   beforeEach(() => {
+    prisma.user.findUnique.mockReset();
     prisma.user.findUnique.mockResolvedValue(mockUserA);
     prisma.message.findMany.mockResolvedValue([
       { id: 'm1', senderId: USER_A, receiverId: USER_B, content: 'Hi', read: true, createdAt: new Date() },

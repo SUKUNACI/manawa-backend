@@ -8,11 +8,20 @@ jest.mock('../src/config/db', () => ({
   subscription: { upsert: jest.fn(), updateMany: jest.fn() },
   promoCode:    { findUnique: jest.fn() },
   promoUsage:   { findUnique: jest.fn() },
+  appConfig:    { upsert: jest.fn().mockResolvedValue({}) },
   $transaction: jest.fn(ops => Promise.all(ops)),
 }));
 
 jest.mock('../src/utils/appConfig', () => ({
   getConfig: jest.fn().mockResolvedValue(null),
+  setConfig: jest.fn().mockResolvedValue({}),
+}));
+
+jest.mock('../src/utils/geniuspay', () => ({
+  createPayment: jest.fn().mockResolvedValue({
+    reference: 'gp-ref-123',
+    checkout_url: 'https://pay.geniuspay.test/checkout/gp-ref-123',
+  }),
 }));
 
 const prisma    = require('../src/config/db');
@@ -32,6 +41,7 @@ const mockCli  = { id: CLIENT_ID, role: 'CLIENT',    suspended: false };
 const mockProfessional = {
   id: 'p-1', userId: PRO_ID, trialEndsAt: null,
   subscription: null,
+  user: { id: PRO_ID, firstName: 'Marc', lastName: 'Dupont', email: 'pro@test.com', phone: '' },
 };
 
 const mockProfessionalWithTrial = {
@@ -242,22 +252,22 @@ describe('POST /api/subscriptions/checkout', () => {
     });
   });
 
-  test('active l\'abonnement et retourne activated:true', async () => {
+  test('initie le paiement GeniusPay et retourne paymentUrl', async () => {
     const res = await request(app)
       .post('/api/subscriptions/checkout')
       .set('Authorization', `Bearer ${proToken(PRO_ID)}`)
       .send({ tier: 'ESSENTIEL' });
 
     expect(res.status).toBe(200);
-    expect(res.body.activated).toBe(true);
+    expect(res.body).toHaveProperty('paymentUrl');
+    expect(res.body).toHaveProperty('reference');
     expect(res.body.tier).toBe('ESSENTIEL');
-    expect(res.body).toHaveProperty('expiresAt');
     expect(prisma.subscription.upsert).toHaveBeenCalled();
   });
 
   test('accepte les tiers valides : PRO, ELITE', async () => {
     for (const tier of ['PRO', 'ELITE']) {
-      prisma.subscription.upsert.mockResolvedValue({ tier, status: 'ACTIVE', expiresAt: new Date() });
+      prisma.subscription.upsert.mockResolvedValue({ tier, status: 'PENDING_PAYMENT', transactionId: 'gp-ref-123' });
 
       const res = await request(app)
         .post('/api/subscriptions/checkout')
@@ -266,6 +276,7 @@ describe('POST /api/subscriptions/checkout', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.tier).toBe(tier);
+      expect(res.body).toHaveProperty('paymentUrl');
     }
   });
 

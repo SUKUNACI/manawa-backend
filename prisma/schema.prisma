@@ -41,6 +41,8 @@ model User {
   follows               Follow[]
   receivedMessages      Message[]              @relation("ReceivedMessages")
   sentMessages          Message[]              @relation("SentMessages")
+  referralsMade         Referral[]             @relation("ReferralsMade")
+  referralsReceived     Referral[]             @relation("ReferralsReceived")
   portfolioLikes        PortfolioLike[]
   portfolioProjectLikes PortfolioProjectLike[]
   portfolioComments     PortfolioComment[]
@@ -117,6 +119,7 @@ model Professional {
   bookings                Booking[]
   servicePackages         ServicePackage[]
   packageOrders           PackageOrder[]
+  badges                  ProfessionalBadge[]
 }
 
 model PortfolioItem {
@@ -689,6 +692,18 @@ model ServicePackage {
   @@index([active])
 }
 
+model ProfessionalBadge {
+  id             String   @id @default(uuid())
+  professionalId String
+  badgeKey       String
+  earnedAt       DateTime @default(now())
+
+  professional Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@unique([professionalId, badgeKey])
+  @@index([professionalId])
+}
+
 model PackageOrder {
   id               String   @id @default(uuid())
   packageId        String
@@ -711,4 +726,24 @@ model PackageOrder {
   @@index([packageId])
   @@index([clientId])
   @@index([professionalId])
+}
+
+model Referral {
+  id           String    @id @default(uuid())
+  referrerId   String    // pro qui parraine (userId)
+  referredId   String    // pro parrainé (userId)
+  code         String    // code utilisé
+  status       String    @default("PENDING") // PENDING | QUALIFIED | REWARDED
+  rewardType   String?   // 'SUBSCRIPTION_MONTH' | 'PROMO_CREDIT'
+  rewardValue  Float?
+  qualifiedAt  DateTime? // date où le filleul a complété sa 1ère mission
+  rewardedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  referrer User @relation("ReferralsMade", fields: [referrerId], references: [id])
+  referred User @relation("ReferralsReceived", fields: [referredId], references: [id])
+
+  @@unique([referredId]) // un user ne peut être parrainé qu'une fois
+  @@index([referrerId])
+  @@index([code])
 }

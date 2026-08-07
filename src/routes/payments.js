@@ -377,6 +377,101 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
             data: { status: 'COMPLETED' },
           });
         }
+
+        // Vérifier si c'est le 1er paiement complété pour un pro parrainé
+        try {
+          const fullPayment = await prisma.payment.findUnique({
+            where: { id: payment.id },
+            include: {
+              quote: {
+                include: {
+                  professional: true,
+                },
+              },
+            },
+          });
+
+          if (fullPayment?.quote?.professional) {
+            const proUserId = fullPayment.quote.professional.userId;
+            const referral = await prisma.referral.findUnique({ where: { referredId: proUserId } });
+
+            if (referral && referral.status === 'PENDING') {
+              const completedCount = await prisma.payment.count({
+                where: {
+                  quote: { professional: { userId: proUserId } },
+                  status: 'succeeded',
+                },
+              });
+
+              if (completedCount >= 1) {
+                await prisma.referral.update({
+                  where: { id: referral.id },
+                  data: { status: 'QUALIFIED', qualifiedAt: new Date() },
+                });
+
+                // Notifier le parrain
+                sendPushNotification(
+                  referral.referrerId,
+                  '🏆 Récompense parrainage !',
+                  'Votre filleul a complété sa première mission. Votre récompense arrive !',
+                  { type: 'referral_qualified' }
+                );
+
+                // Récupérer le pro du parrain pour le upsert subscription
+                const referrerPro = await prisma.professional.findUnique({
+                  where: { userId: referral.referrerId },
+                  select: { id: true, subscription: true },
+                });
+
+                if (referrerPro) {
+                  const now = new Date();
+                  const currentExpiry = referrerPro.subscription?.expiresAt;
+                  // Si abonnement actif, on prolonge à partir de l'expiry courante ; sinon +30j depuis maintenant
+                  const baseDate = (currentExpiry && currentExpiry > now) ? currentExpiry : now;
+                  const newExpiry = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+                  await prisma.subscription.upsert({
+                    where: { professionalId: referrerPro.id },
+                    create: {
+                      professionalId: referrerPro.id,
+                      status: 'ACTIVE',
+                      tier: 'PRO',
+                      startedAt: now,
+                      expiresAt: newExpiry,
+                    },
+                    update: {
+                      status: 'ACTIVE',
+                      tier: referrerPro.subscription?.tier === 'ELITE' ? 'ELITE' : 'PRO',
+                      startedAt: referrerPro.subscription?.startedAt || now,
+                      expiresAt: newExpiry,
+                    },
+                  });
+
+                  await prisma.referral.update({
+                    where: { id: referral.id },
+                    data: {
+                      status: 'REWARDED',
+                      rewardedAt: new Date(),
+                      rewardType: 'SUBSCRIPTION_MONTH',
+                      rewardValue: 1,
+                    },
+                  });
+
+                  // Notifier le parrain que sa récompense a été appliquée
+                  sendPushNotification(
+                    referral.referrerId,
+                    '🎁 1 mois PRO offert !',
+                    'Votre récompense de parrainage a été appliquée : 1 mois d\'abonnement PRO offert !',
+                    { type: 'referral_rewarded' }
+                  );
+                }
+              }
+            }
+          }
+        } catch (referralErr) {
+          console.error('[Referral] Erreur traitement récompense parrainage:', referralErr.message);
+          // Ne pas faire crasher le webhook
+        }
       }
 
       res.json({ success: true, message: 'Payment processed' });

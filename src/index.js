@@ -35,6 +35,8 @@ const disputeRoutes = require('./routes/disputes');
 const availabilityRoutes = require('./routes/availability');
 const packageRoutes = require('./routes/packages');
 const searchRoutes = require('./routes/search');
+const badgeRoutes = require('./routes/badges');
+const referralRoutes = require('./routes/referrals');
 
 // Firebase initialization
 const { initializeFirebase, getMessaging } = require('./config/firebase-admin');
@@ -178,6 +180,8 @@ app.use('/api/disputes', disputeRoutes);
 app.use('/api/availability', availabilityRoutes);
 app.use('/api/packages', packageRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/badges', badgeRoutes);
+app.use('/api/referrals', referralRoutes);
 
 // Panel d'administration
 const prismaForIPGuard = require('./config/db');

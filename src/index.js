@@ -235,6 +235,37 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Redirection QR code profil pro — manawa://pro/:id si app installée, sinon page web
+app.get('/p/:proId', (req, res) => {
+  const { proId } = req.params;
+  if (!/^[a-zA-Z0-9_-]+$/.test(proId)) return res.status(400).send('ID invalide');
+  const deepLink = `manawa://pro/${proId}`;
+  const storeUrl = 'https://play.google.com/store/apps/details?id=com.manawa.app';
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Profil artisan MANAWA</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; background: #0A0D14; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; gap: 16px; padding: 24px; box-sizing: border-box; text-align: center; }
+    .logo { font-size: 28px; font-weight: 900; color: #F4720B; letter-spacing: 2px; }
+    p { color: rgba(255,255,255,0.65); font-size: 15px; line-height: 1.5; }
+    a.btn { display: inline-block; background: #F4720B; color: #fff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 15px; }
+    a.store { color: rgba(255,255,255,0.45); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="logo">MANAWA</div>
+  <p>Ouvrez ce profil dans l'application MANAWA</p>
+  <a class="btn" href="${deepLink}">Ouvrir dans l'app</a>
+  <a class="store" href="${storeUrl}">Télécharger MANAWA</a>
+  <script>window.location.href = "${deepLink}";</script>
+</body>
+</html>`);
+});
+
 // Messagerie temps réel (Socket.IO) — authentification par token JWT
 const onlineUsers = new Map();
 

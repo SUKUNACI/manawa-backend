@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const prisma = require('../config/db');
 const upload = require('../config/upload');
 const { verifyMagicBytes } = require('../config/upload');

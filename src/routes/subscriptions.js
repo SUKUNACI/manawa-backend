@@ -1,7 +1,9 @@
 const express = require('express');
+const crypto = require('crypto');
 const prisma = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
-
+const geniuspay = require('../utils/geniuspay');
+const { sendPushNotification } = require('../config/pushNotifications');
 const { getConfig } = require('../utils/appConfig');
 
 const router = express.Router();
@@ -249,8 +251,10 @@ router.post('/checkout', requireAuth, requireRole('PROFESSIONAL'), async (req, r
     const prices = await getDynamicPrices();
     const tierConfig = getTierConfig(tier, prices);
 
-    const pro = await prisma.professional.findUnique({ where: { userId: req.user.id } });
-    const transactionId = `sub-${tier.toLowerCase()}-${pro.id}-${Date.now()}`;
+    const pro = await prisma.professional.findUnique({
+      where: { userId: req.user.id },
+      include: { user: true },
+    });
 
     // Valider et appliquer le code promo si fourni
     let promoData = null;
@@ -263,31 +267,189 @@ router.post('/checkout', requireAuth, requireRole('PROFESSIONAL'), async (req, r
       finalAmount = applied.finalAmount;
     }
 
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    // Abonnement gratuit (code promo 100%) : activation directe
+    if (finalAmount === 0) {
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const transactionId = `sub-free-${tier.toLowerCase()}-${pro.id}-${Date.now()}`;
+      await prisma.subscription.upsert({
+        where: { professionalId: pro.id },
+        create: { professionalId: pro.id, tier, status: 'ACTIVE', transactionId, startedAt: new Date(), expiresAt },
+        update: { tier, status: 'ACTIVE', transactionId, startedAt: new Date(), expiresAt },
+      });
+      if (promoData) {
+        await prisma.$transaction([
+          prisma.promoUsage.create({
+            data: {
+              promoCodeId: promoData.promo.id,
+              professionalId: pro.id,
+              tier,
+              originalAmount: tierConfig.price,
+              discountAmount: promoData.discountAmount,
+              finalAmount: 0,
+            },
+          }),
+          prisma.promoCode.update({ where: { id: promoData.promo.id }, data: { usedCount: { increment: 1 } } }),
+        ]);
+      }
+      return res.json({ activated: true, tier, expiresAt, discount: promoData ? promoData.discountAmount : 0, finalAmount: 0 });
+    }
+
+    // Paiement réel via GeniusPay
+    const idempotencyKey = crypto.randomUUID();
+    const base = process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000';
+    const successUrl = `${base}/api/subscriptions/success?proId=${pro.id}&tier=${tier}&ikey=${idempotencyKey}`;
+    const errorUrl = `${base}/api/subscriptions/error?proId=${pro.id}&tier=${tier}`;
+
+    const paymentResult = await geniuspay.createPayment({
+      amount: finalAmount,
+      description: `Abonnement MANAWA ${TIERS[tier].label} — 1 mois`,
+      customerName: `${pro.user.firstName} ${pro.user.lastName}`,
+      customerEmail: pro.user.email,
+      customerPhone: pro.user.phone || '',
+      quoteId: null,
+      projectId: null,
+      isDeposit: false,
+      userId: req.user.id,
+      idempotencyKey,
+      successUrl,
+      errorUrl,
+    });
+
+    const paymentData = paymentResult.data || paymentResult;
+    const geniuspayRef = paymentData.reference;
+    const paymentUrl = paymentData.checkout_url || paymentData.payment_url || paymentData.checkoutUrl;
+
+    // Enregistrer la souscription en attente de paiement
     await prisma.subscription.upsert({
       where: { professionalId: pro.id },
-      create: { professionalId: pro.id, tier, status: 'ACTIVE', transactionId, startedAt: new Date(), expiresAt },
-      update: { tier, status: 'ACTIVE', transactionId, startedAt: new Date(), expiresAt },
+      create: {
+        professionalId: pro.id,
+        tier,
+        status: 'PENDING_PAYMENT',
+        transactionId: geniuspayRef,
+        startedAt: null,
+        expiresAt: null,
+      },
+      update: {
+        tier,
+        status: 'PENDING_PAYMENT',
+        transactionId: geniuspayRef,
+        startedAt: null,
+        expiresAt: null,
+      },
     });
+
+    // Stocker le code promo en attente pour l'appliquer après confirmation
     if (promoData) {
-      await prisma.$transaction([
-        prisma.promoUsage.create({
-          data: {
+      await prisma.appConfig.upsert({
+        where: { key: `pending_promo_${geniuspayRef}` },
+        create: {
+          key: `pending_promo_${geniuspayRef}`,
+          value: JSON.stringify({
             promoCodeId: promoData.promo.id,
             professionalId: pro.id,
             tier,
             originalAmount: tierConfig.price,
             discountAmount: promoData.discountAmount,
-            finalAmount: promoData.finalAmount,
-          },
-        }),
-        prisma.promoCode.update({ where: { id: promoData.promo.id }, data: { usedCount: { increment: 1 } } }),
-      ]);
+            finalAmount,
+          }),
+        },
+        update: {
+          value: JSON.stringify({
+            promoCodeId: promoData.promo.id,
+            professionalId: pro.id,
+            tier,
+            originalAmount: tierConfig.price,
+            discountAmount: promoData.discountAmount,
+            finalAmount,
+          }),
+        },
+      });
     }
-    return res.json({ activated: true, tier, expiresAt, discount: promoData ? promoData.discountAmount : 0, finalAmount });
+
+    return res.json({
+      paymentUrl,
+      reference: geniuspayRef,
+      tier,
+      finalAmount,
+      discount: promoData ? promoData.discountAmount : 0,
+    });
   } catch (err) {
+    const detail = err.response?.data || err.message;
+    console.error('[Subscription] checkout error:', JSON.stringify(detail));
+    // Erreur GeniusPay → message lisible au lieu de 500 générique
+    if (err.response?.status === 401 || err.response?.data?.error?.code === 'INVALID_API_KEY') {
+      return res.status(503).json({ error: 'Service de paiement temporairement indisponible. Veuillez réessayer plus tard.' });
+    }
+    if (err.response?.data?.error?.message) {
+      return res.status(502).json({ error: err.response.data.error.message });
+    }
     next(err);
   }
+});
+
+// GET /api/subscriptions/success — callback GeniusPay (redirect deep link)
+router.get('/success', async (req, res) => {
+  const { proId, tier, ikey } = req.query;
+  const deepLink = `manawa://subscription/success?tier=${encodeURIComponent(tier || '')}`;
+  const deepLinkEncoded = deepLink.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  res.send(`
+    <html>
+      <head>
+        <title>Abonnement activé</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: -apple-system, sans-serif; text-align: center; padding: 60px 24px; background: #0A0D14; color: #fff; }
+          .icon { font-size: 64px; margin-bottom: 16px; }
+          h2 { color: #22C55E; font-size: 24px; margin-bottom: 8px; }
+          p { color: #9CA3AF; font-size: 15px; line-height: 1.5; }
+          .btn { display: inline-block; margin-top: 32px; background: #F4720B; color: #fff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-size: 16px; font-weight: 600; }
+        </style>
+      </head>
+      <body>
+        <div class="icon">✅</div>
+        <h2>Abonnement activé !</h2>
+        <p>Votre paiement a été confirmé.<br>Retour automatique sur MANAWA...</p>
+        <a class="btn" href="${deepLinkEncoded}">Retourner sur MANAWA</a>
+        <script>
+          var dl = document.querySelector('.btn').getAttribute('href');
+          window.onload = function() { window.location.href = dl; };
+        </script>
+      </body>
+    </html>
+  `);
+});
+
+// GET /api/subscriptions/error — callback GeniusPay échec
+router.get('/error', async (req, res) => {
+  const { tier } = req.query;
+  const deepLink = `manawa://subscription/error?tier=${encodeURIComponent(tier || '')}`;
+  const deepLinkEncoded = deepLink.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  res.send(`
+    <html>
+      <head>
+        <title>Paiement échoué</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: -apple-system, sans-serif; text-align: center; padding: 60px 24px; background: #0A0D14; color: #fff; }
+          .icon { font-size: 64px; margin-bottom: 16px; }
+          h2 { color: #EF4444; font-size: 24px; margin-bottom: 8px; }
+          p { color: #9CA3AF; font-size: 15px; line-height: 1.5; }
+          .btn { display: inline-block; margin-top: 32px; background: #F4720B; color: #fff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-size: 16px; font-weight: 600; }
+        </style>
+      </head>
+      <body>
+        <div class="icon">❌</div>
+        <h2>Paiement échoué</h2>
+        <p>Une erreur s'est produite.<br>Retour automatique sur MANAWA...</p>
+        <a class="btn" href="${deepLinkEncoded}">Retourner sur MANAWA</a>
+        <script>
+          var dl = document.querySelector('.btn').getAttribute('href');
+          window.onload = function() { window.location.href = dl; };
+        </script>
+      </body>
+    </html>
+  `);
 });
 
 

@@ -33,6 +33,7 @@ const portfolioProjectsRoutes = require('./routes/portfolio-projects');
 const reportsRoutes = require('./routes/reports');
 const disputeRoutes = require('./routes/disputes');
 const availabilityRoutes = require('./routes/availability');
+const packageRoutes = require('./routes/packages');
 
 // Firebase initialization
 const { initializeFirebase, getMessaging } = require('./config/firebase-admin');
@@ -174,6 +175,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/disputes', disputeRoutes);
 app.use('/api/availability', availabilityRoutes);
+app.use('/api/packages', packageRoutes);
 
 // Panel d'administration
 const prismaForIPGuard = require('./config/db');

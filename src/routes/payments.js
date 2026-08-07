@@ -284,6 +284,47 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
         return res.json({ success: true, message: 'Subscription activated' });
       }
 
+      // Vérifier si c'est un paiement de commande de forfait
+      const packageOrder = await prisma.packageOrder.findFirst({
+        where: { transactionId: reference, status: 'PENDING_PAYMENT' },
+        include: {
+          package: { select: { id: true, title: true } },
+          professional: { include: { user: { select: { id: true, firstName: true, lastName: true } } } },
+          client: { select: { id: true, firstName: true, lastName: true } },
+        },
+      });
+
+      if (packageOrder) {
+        await prisma.$transaction([
+          prisma.packageOrder.update({
+            where: { id: packageOrder.id },
+            data: { status: 'PAID' },
+          }),
+          prisma.servicePackage.update({
+            where: { id: packageOrder.packageId },
+            data: { ordersCount: { increment: 1 } },
+          }),
+        ]);
+
+        // Notif push au pro
+        sendPushNotification(
+          packageOrder.professional.user.id,
+          '🛒 Nouvelle commande reçue !',
+          `${packageOrder.client.firstName} ${packageOrder.client.lastName} a commandé votre forfait "${packageOrder.package.title}".`,
+          { type: 'package_order_paid', orderId: packageOrder.id, packageId: packageOrder.packageId },
+        );
+
+        // Notif push au client
+        sendPushNotification(
+          packageOrder.clientId,
+          '✅ Commande confirmée !',
+          `Votre commande pour "${packageOrder.package.title}" est confirmée. Le professionnel va vous contacter.`,
+          { type: 'package_order_confirmed', orderId: packageOrder.id, packageId: packageOrder.packageId },
+        );
+
+        return res.json({ success: true, message: 'Package order paid' });
+      }
+
       const payment = await prisma.payment.findUnique({
         where: { geniuspayRef: reference },
         include: { quote: { include: { project: true } } },
@@ -354,6 +395,18 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
         // Nettoyer le promo en attente
         await prisma.appConfig.deleteMany({ where: { key: `pending_promo_${reference}` } }).catch(() => null);
         return res.json({ success: true, message: 'Subscription payment failure recorded' });
+      }
+
+      // Commande de forfait en attente : annuler
+      const failedPackageOrder = await prisma.packageOrder.findFirst({
+        where: { transactionId: reference, status: 'PENDING_PAYMENT' },
+      });
+      if (failedPackageOrder) {
+        await prisma.packageOrder.update({
+          where: { id: failedPackageOrder.id },
+          data: { status: 'CANCELLED' },
+        });
+        return res.json({ success: true, message: 'Package order payment failure recorded' });
       }
 
       const failedPayment = await prisma.payment.findUnique({ where: { geniuspayRef: reference } });

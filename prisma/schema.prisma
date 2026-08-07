@@ -55,6 +55,7 @@ model User {
   notifications         Notification[]
   disputes              Dispute[]
   refreshTokens         RefreshToken[]
+  clientPackageOrders   PackageOrder[]         @relation("ClientPackageOrders")
 }
 
 model RefreshToken {
@@ -114,6 +115,8 @@ model Professional {
   subscription            Subscription?
   availabilitySlots       AvailabilitySlot[]
   bookings                Booking[]
+  servicePackages         ServicePackage[]
+  packageOrders           PackageOrder[]
 }
 
 model PortfolioItem {
@@ -234,6 +237,7 @@ model Project {
   quotes                    Quote[]
   review                    Review?
   bookings                  Booking[]
+  packageOrders             PackageOrder[]
 }
 
 model ProjectPhoto {
@@ -661,4 +665,50 @@ model Booking {
   @@index([professionalId])
   @@index([clientId])
   @@index([date])
+}
+
+model ServicePackage {
+  id             String   @id @default(uuid())
+  professionalId String
+  title          String
+  description    String?
+  price          Float
+  duration       String?  // "1 jour", "2-3 jours"
+  category       String?  // même liste que les trades
+  included       String[] @default([]) // liste de ce qui est inclus
+  images         String[] @default([]) // URLs Cloudinary
+  active         Boolean  @default(true)
+  ordersCount    Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  professional Professional  @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  orders       PackageOrder[]
+
+  @@index([professionalId])
+  @@index([active])
+}
+
+model PackageOrder {
+  id               String   @id @default(uuid())
+  packageId        String
+  clientId         String
+  professionalId   String
+  amount           Float
+  status           String   @default("PENDING_PAYMENT") // PENDING_PAYMENT | PAID | IN_PROGRESS | COMPLETED | CANCELLED | REFUNDED
+  transactionId    String?
+  paymentUrl       String?
+  projectId        String?
+  note             String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  package      ServicePackage @relation(fields: [packageId], references: [id])
+  client       User           @relation("ClientPackageOrders", fields: [clientId], references: [id])
+  professional Professional   @relation(fields: [professionalId], references: [id])
+  project      Project?       @relation(fields: [projectId], references: [id])
+
+  @@index([packageId])
+  @@index([clientId])
+  @@index([professionalId])
 }

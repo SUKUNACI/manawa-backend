@@ -1,5 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const bcrypt = require('bcrypt');
 const prisma = require('../config/db');
 const upload = require('../config/upload');
 const { verifyMagicBytes } = require('../config/upload');
@@ -87,5 +88,66 @@ router.post('/me/avatar', requireAuth, upload.single('avatar'), verifyMagicBytes
     next(err);
   }
 });
+
+router.delete('/me',
+  requireAuth,
+  body('password').notEmpty().withMessage('Mot de passe requis'),
+  async (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
+
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { passwordHash: true },
+      });
+      const valid = await bcrypt.compare(req.body.password, user.passwordHash);
+      if (!valid) return res.status(401).json({ error: 'Mot de passe incorrect' });
+
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data: { deletedAt: new Date() },
+      });
+      await prisma.pushToken.deleteMany({ where: { userId: req.user.id } });
+      await prisma.refreshToken.deleteMany({ where: { userId: req.user.id } });
+
+      res.json({ deleted: true });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.patch('/me/password',
+  requireAuth,
+  [
+    body('currentPassword').notEmpty().withMessage('Mot de passe actuel requis'),
+    body('newPassword').isLength({ min: 8 }).withMessage('Le nouveau mot de passe doit contenir au moins 8 caractères'),
+  ],
+  async (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0].msg });
+
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { passwordHash: true },
+      });
+      const valid = await bcrypt.compare(req.body.currentPassword, user.passwordHash);
+      if (!valid) return res.status(401).json({ error: 'Mot de passe actuel incorrect' });
+
+      const passwordHash = await bcrypt.hash(req.body.newPassword, 12);
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data: { passwordHash },
+      });
+      await prisma.refreshToken.deleteMany({ where: { userId: req.user.id } });
+
+      res.json({ changed: true });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 module.exports = router;

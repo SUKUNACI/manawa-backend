@@ -142,4 +142,35 @@ router.get('/history', requireAuth, async (req, res, next) => {
   }
 });
 
+router.patch('/read-all', requireAuth, async (req, res, next) => {
+  try {
+    await prisma.notification.updateMany({
+      where: { userId: req.user.id, read: false },
+      data: { read: true },
+    });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/:id/read', requireAuth, async (req, res, next) => {
+  try {
+    const notification = await prisma.notification.findUnique({
+      where: { id: req.params.id },
+      select: { userId: true },
+    });
+    if (!notification || notification.userId !== req.user.id) {
+      return res.status(404).json({ error: 'Notification introuvable' });
+    }
+    await prisma.notification.update({
+      where: { id: req.params.id },
+      data: { read: true },
+    });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

@@ -3,6 +3,8 @@ const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
 const { requireAuth, requireEmailVerified } = require('../middleware/auth');
 const { sendPushNotification } = require('../config/pushNotifications');
+const upload = require('../config/upload');
+const { uploadBuffer } = require('../config/cloudinary');
 
 const router = express.Router();
 
@@ -75,8 +77,14 @@ router.post('/', requireAuth, requireEmailVerified, messageLimiter, async (req, 
       }
     }
 
+    const { attachmentUrl, attachmentType } = req.body;
     const message = await prisma.message.create({
-      data: { senderId: req.user.id, receiverId, content: content.trim() },
+      data: {
+        senderId: req.user.id,
+        receiverId,
+        content: content.trim(),
+        ...(attachmentUrl ? { attachmentUrl, attachmentType: attachmentType || null } : {}),
+      },
     });
 
     // Notifier le destinataire
@@ -150,6 +158,22 @@ router.get('/:userId', requireAuth, async (req, res, next) => {
     });
 
     res.json(messages.reverse());
+  } catch (err) {
+    next(err);
+  }
+});
+
+const ATTACHMENT_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+
+router.post('/upload-attachment', requireAuth, upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
+    if (!ATTACHMENT_MIMES.includes(req.file.mimetype)) {
+      return res.status(400).json({ error: 'Type de fichier non autorisé. Formats acceptés : JPEG, PNG, WebP, PDF' });
+    }
+    const url = await uploadBuffer(req.file.buffer, 'manawa_attachments');
+    const type = req.file.mimetype === 'application/pdf' ? 'pdf' : 'image';
+    res.json({ url, type, name: req.file.originalname });
   } catch (err) {
     next(err);
   }

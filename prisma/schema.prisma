@@ -48,6 +48,7 @@ model User {
   profileViews          ProfileView[]
   projects              Project[]              @relation("ClientProjects")
   reviewsWritten        Review[]               @relation("ReviewAuthor")
+  clientBookings        Booking[]              @relation("ClientBookings")
   contentReports        ContentReport[]
   supportTickets        SupportTicket[]
   pushTokens            PushToken[]
@@ -111,6 +112,8 @@ model Professional {
   quotes                  Quote[]
   reviews                 Review[]           @relation("ReviewedProfessional")
   subscription            Subscription?
+  availabilitySlots       AvailabilitySlot[]
+  bookings                Booking[]
 }
 
 model PortfolioItem {
@@ -230,6 +233,7 @@ model Project {
   photos                    ProjectPhoto[]
   quotes                    Quote[]
   review                    Review?
+  bookings                  Booking[]
 }
 
 model ProjectPhoto {
@@ -612,4 +616,49 @@ model Dispute {
 
   payment Payment @relation(fields: [paymentId], references: [id])
   client  User    @relation(fields: [clientId], references: [id])
+}
+
+model AvailabilitySlot {
+  id             String       @id @default(uuid())
+  professionalId String
+  type           String       // 'RECURRING' | 'EXCEPTION'
+  // Recurring fields
+  dayOfWeek      Int?         // 0=Dimanche … 6=Samedi
+  startTime      String?      // "08:00"
+  endTime        String?      // "17:00"
+  // Exception fields (indisponibilité ou plage spéciale)
+  date           DateTime?
+  available      Boolean      @default(true) // false = indispo ce jour
+  note           String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  professional Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId])
+  @@index([date])
+}
+
+model Booking {
+  id             String       @id @default(uuid())
+  professionalId String
+  clientId       String
+  date           DateTime     // Jour de la réservation (à minuit UTC)
+  startTime      String       // "09:00"
+  endTime        String       // "11:00"
+  status         String       @default("PENDING") // PENDING | CONFIRMED | CANCELLED | COMPLETED
+  note           String?
+  projectId      String?
+  cancelReason   String?
+  cancelledBy    String?      // userId qui a annulé
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  professional Professional @relation(fields: [professionalId], references: [id])
+  client       User         @relation("ClientBookings", fields: [clientId], references: [id])
+  project      Project?     @relation(fields: [projectId], references: [id])
+
+  @@index([professionalId])
+  @@index([clientId])
+  @@index([date])
 }

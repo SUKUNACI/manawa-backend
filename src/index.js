@@ -65,8 +65,8 @@ app.use((req, res, next) => {
           scriptSrcAttr: ["'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com"],
-          imgSrc: ["'self'", "data:", "https://*.openstreetmap.org", "https://unpkg.com", "https://*.tile.openstreetmap.org"],
-          connectSrc: ["'self'", "https://api.ipify.org", "https://unpkg.com"],
+          imgSrc: ["'self'", "data:", "https://res.cloudinary.com", "https://*.openstreetmap.org", "https://unpkg.com", "https://*.tile.openstreetmap.org"],
+          connectSrc: ["'self'", "https://api.ipify.org"],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],
           formAction: ["'self'"],
@@ -428,6 +428,11 @@ setTimeout(() => {
   reconcilePendingPayments();
   setInterval(reconcilePendingPayments, 60 * 60 * 1000);
 }, 30 * 60 * 1000);
+
+// Backup quotidien de la base de données via l'API Neon branching
+const { createDailyBackupBranch } = require('./utils/dbBackup');
+setInterval(createDailyBackupBranch, 24 * 60 * 60 * 1000);
+createDailyBackupBranch();
 
 const { seedConfig, ensureSuperAdmin } = require('./utils/appConfig');
 

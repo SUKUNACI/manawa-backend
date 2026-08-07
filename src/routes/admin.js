@@ -11,6 +11,14 @@ const { refundPayment } = require('../utils/geniuspay');
 
 const router = express.Router();
 
+const NAME_RE = /^[^<>&"'/\\]+$/;
+function sanitizeName(value, field) {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v || v.length > 50 || !NAME_RE.test(v)) return null;
+  return v;
+}
+
 // Rate limiting global sur le router admin
 const adminReadLimit = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, message: { error: 'Trop de requêtes — réessayez dans une minute' } });
 const adminWriteLimit = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { error: 'Trop de requêtes — réessayez dans une minute' } });
@@ -257,7 +265,9 @@ router.post('/me/change-password', requireSuperAdmin, async (req, res, next) => 
 // POST /api/admin/create-admin — créer un compte administrateur STANDARD (super admin seulement)
 router.post('/create-admin', requireSuperAdmin, async (req, res, next) => {
   try {
-    const { email, password, firstName, lastName } = req.body;
+    const { email, password } = req.body;
+    const firstName = sanitizeName(req.body.firstName);
+    const lastName = sanitizeName(req.body.lastName);
     if (!email || !password || !firstName || !lastName) {
       return res.status(400).json({ error: 'Tous les champs sont requis' });
     }
@@ -374,7 +384,11 @@ router.patch('/admins/:id/reset-password', requireSuperAdmin, async (req, res, n
 // PATCH /api/admin/admins/:id/profile — modifier le profil d'un admin STANDARD
 router.patch('/admins/:id/profile', requireSuperAdmin, async (req, res, next) => {
   try {
-    const { firstName, lastName, email } = req.body;
+    const { email } = req.body;
+    const firstName = req.body.firstName !== undefined ? sanitizeName(req.body.firstName) : undefined;
+    const lastName  = req.body.lastName  !== undefined ? sanitizeName(req.body.lastName)  : undefined;
+    if (req.body.firstName !== undefined && !firstName) return res.status(400).json({ error: 'Prénom invalide' });
+    if (req.body.lastName  !== undefined && !lastName)  return res.status(400).json({ error: 'Nom invalide' });
     const target = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!target || target.role !== 'ADMIN') return res.status(404).json({ error: 'Admin introuvable' });
     if (target.adminLevel === 'SUPER') return res.status(403).json({ error: 'Impossible de modifier le profil du super admin via cette route' });
@@ -388,8 +402,8 @@ router.patch('/admins/:id/profile', requireSuperAdmin, async (req, res, next) =>
     const updated = await prisma.user.update({
       where: { id: req.params.id },
       data: {
-        ...(firstName && { firstName }),
-        ...(lastName  && { lastName }),
+        ...(firstName !== undefined && { firstName }),
+        ...(lastName  !== undefined && { lastName }),
         ...(email     && { email }),
       },
       select: { id: true, firstName: true, lastName: true, email: true },
@@ -992,7 +1006,11 @@ router.patch('/users/:id', async (req, res, next) => {
     // Ni le rôle ADMIN ni le niveau SUPER ne peuvent être assignés via l'API
     if (req.body.role === 'ADMIN') return res.status(403).json({ error: 'Promotion au rôle ADMIN interdite via l\'API' });
     if (req.body.adminLevel) return res.status(403).json({ error: 'Modification du niveau admin interdite via l\'API' });
-    const { firstName, lastName, email, city, phone } = req.body;
+    const { email, city, phone } = req.body;
+    const firstName = req.body.firstName !== undefined ? sanitizeName(req.body.firstName) : undefined;
+    const lastName  = req.body.lastName  !== undefined ? sanitizeName(req.body.lastName)  : undefined;
+    if (req.body.firstName !== undefined && !firstName) return res.status(400).json({ error: 'Prénom invalide' });
+    if (req.body.lastName  !== undefined && !lastName)  return res.status(400).json({ error: 'Nom invalide' });
 
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
@@ -1006,7 +1024,7 @@ router.patch('/users/:id', async (req, res, next) => {
       where: { id: req.params.id },
       data: {
         ...(firstName !== undefined && { firstName }),
-        ...(lastName !== undefined && { lastName }),
+        ...(lastName  !== undefined && { lastName }),
         ...(email !== undefined && { email }),
         ...(city !== undefined && { city }),
         ...(phone !== undefined && { phone }),
@@ -1156,8 +1174,8 @@ router.patch('/users/:id/restore', async (req, res, next) => {
   }
 });
 
-// DELETE /api/admin/users/:id/purge — suppression définitive (irréversible)
-router.delete('/users/:id/purge', async (req, res, next) => {
+// DELETE /api/admin/users/:id/purge — suppression définitive (irréversible, super admin uniquement)
+router.delete('/users/:id/purge', requireSuperAdmin, async (req, res, next) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.params.id }, include: { professional: true } });
     if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
@@ -1212,6 +1230,7 @@ router.delete('/users/:id/purge', async (req, res, next) => {
       await tx.user.delete({ where: { id: req.params.id } });
     });
 
+    await writeAdminLog(req, 'USER_PURGE', 'User', req.params.id, { role: user.role, email: user.email });
     res.json({ message: 'Compte définitivement supprimé' });
   } catch (err) {
     next(err);
@@ -1415,6 +1434,13 @@ router.patch('/professionals/:id/verify', async (req, res, next) => {
       },
       include: { user: { select: { firstName: true, lastName: true, email: true } } },
     });
+
+    await sendPushNotification(
+      updated.user.id,
+      'Identité vérifiée ✅',
+      'Félicitations ! Votre identité a été validée par notre équipe. Vous pouvez maintenant envoyer des devis.',
+      { type: 'identity_approved' }
+    );
 
     await writeAdminLog(req, 'PRO_VERIFY', 'Professional', req.params.id);
     res.json({ message: 'Identité vérifiée', professional: updated });

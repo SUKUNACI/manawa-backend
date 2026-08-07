@@ -246,7 +246,7 @@ router.get('/:id/history', requireAuth, async (req, res, next) => {
     const history = await prisma.quote.findMany({
       where: { projectId: quote.projectId, professionalId: quote.professionalId },
       include: { items: true },
-      orderBy: { version: 'asc' },
+      orderBy: { version: 'desc' },
     });
 
     res.json(history);

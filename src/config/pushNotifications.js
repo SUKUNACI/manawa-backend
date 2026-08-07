@@ -39,6 +39,8 @@ async function sendViaFCM(token, title, body, data = {}) {
         notification: {
           sound: 'default',
           channelId: 'default',
+          icon: 'notification_icon',
+          color: '#F4720B',
         },
       },
       token: token,

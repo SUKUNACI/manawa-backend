@@ -9,8 +9,8 @@ async function requireAuth(req, res, next) {
   const token = header.split(' ')[1];
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true, email: true, suspended: true, adminLevel: true, adminPermissions: true } });
-    if (!user) return res.status(401).json({ error: 'Utilisateur introuvable' });
+    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { id: true, role: true, email: true, suspended: true, deletedAt: true, adminLevel: true, adminPermissions: true } });
+    if (!user || user.deletedAt) return res.status(401).json({ error: 'Utilisateur introuvable' });
     if (user.suspended) return res.status(403).json({ error: 'Votre compte a été suspendu' });
     req.user = { id: user.id, role: user.role, email: user.email, adminLevel: user.adminLevel, adminPermissions: user.adminPermissions || null };
     next();
@@ -65,4 +65,12 @@ function requireSuperAdmin(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireRole, optionalAuth, requireSuperAdmin, requirePermission };
+async function requireEmailVerified(req, res, next) {
+  const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { emailVerified: true } });
+  if (!user?.emailVerified) {
+    return res.status(403).json({ error: 'Veuillez vérifier votre adresse email avant de continuer.', code: 'EMAIL_NOT_VERIFIED' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireRole, optionalAuth, requireSuperAdmin, requirePermission, requireEmailVerified };

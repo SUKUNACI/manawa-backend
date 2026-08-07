@@ -1,7 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireEmailVerified } = require('../middleware/auth');
 const { sendPushNotification } = require('../config/pushNotifications');
 
 const router = express.Router();
@@ -15,7 +15,7 @@ const messageLimiter = rateLimit({
 });
 
 // POST /api/messages
-router.post('/', requireAuth, messageLimiter, async (req, res, next) => {
+router.post('/', requireAuth, requireEmailVerified, messageLimiter, async (req, res, next) => {
   try {
     const { receiverId, content } = req.body;
     if (!receiverId || !content || !content.trim()) {

@@ -102,7 +102,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
 router.get('/featured/random', optionalAuth, async (req, res, next) => {
   try {
     const premiumPros = await prisma.professional.findMany({
-      where: { subscription: { status: 'ACTIVE', expiresAt: { gt: new Date() } } },
+      where: { subscription: { status: 'ACTIVE', expiresAt: { gt: new Date() }, tier: { in: ['PRO', 'ELITE'] } } },
       include: { user: { select: PUBLIC_USER_SELECT }, portfolio: true },
     });
 
@@ -347,6 +347,7 @@ router.post(
   requireAuth,
   requireRole('PROFESSIONAL'),
   upload.fields([{ name: 'idDocumentRecto', maxCount: 1 }, { name: 'idDocumentVerso', maxCount: 1 }, { name: 'selfie', maxCount: 1 }]),
+  verifyMagicBytes,
   async (req, res, next) => {
     try {
       const existing = await prisma.professional.findUnique({ where: { userId: req.user.id }, select: { identityStatus: true } });

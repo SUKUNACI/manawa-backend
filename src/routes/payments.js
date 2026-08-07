@@ -2,7 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, requireEmailVerified } = require('../middleware/auth');
 const geniuspay = require('../utils/geniuspay');
 const { logPaymentStatus } = require('../utils/paymentAudit');
 const { sendPushNotification } = require('../config/pushNotifications');
@@ -91,7 +91,7 @@ async function verifyAndUpdatePayment(payment, gpData, reason = 'recheck') {
 }
 
 // POST /api/payments/create-checkout
-router.post('/create-checkout', requireAuth, requireRole('CLIENT'), paymentRateLimit, async (req, res, next) => {
+router.post('/create-checkout', requireAuth, requireRole('CLIENT'), requireEmailVerified, paymentRateLimit, async (req, res, next) => {
   try {
     const { quoteId, isDeposit } = req.body;
     console.log('[Payment] create-checkout called, quoteId:', quoteId, 'isDeposit:', isDeposit);
@@ -238,6 +238,52 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
     if (event === 'payment.success' && data.status === 'completed') {
       const reference = data.reference;
 
+      // Vérifier si c'est un paiement d'abonnement
+      const subscription = await prisma.subscription.findFirst({
+        where: { transactionId: reference, status: 'PENDING_PAYMENT' },
+        include: { professional: { include: { user: true } } },
+      });
+
+      if (subscription) {
+        const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        await prisma.subscription.update({
+          where: { id: subscription.id },
+          data: { status: 'ACTIVE', startedAt: new Date(), expiresAt },
+        });
+
+        // Appliquer le code promo si en attente
+        const pendingPromoKey = `pending_promo_${reference}`;
+        const pendingPromoConfig = await prisma.appConfig.findUnique({ where: { key: pendingPromoKey } }).catch(() => null);
+        if (pendingPromoConfig) {
+          try {
+            const pd = JSON.parse(pendingPromoConfig.value);
+            await prisma.$transaction([
+              prisma.promoUsage.create({
+                data: {
+                  promoCodeId: pd.promoCodeId,
+                  professionalId: pd.professionalId,
+                  tier: pd.tier,
+                  originalAmount: pd.originalAmount,
+                  discountAmount: pd.discountAmount,
+                  finalAmount: pd.finalAmount,
+                },
+              }),
+              prisma.promoCode.update({ where: { id: pd.promoCodeId }, data: { usedCount: { increment: 1 } } }),
+              prisma.appConfig.delete({ where: { key: pendingPromoKey } }),
+            ]);
+          } catch {}
+        }
+
+        sendPushNotification(
+          subscription.professional.userId,
+          '🎉 Abonnement activé !',
+          `Votre plan ${subscription.tier} est maintenant actif pour 30 jours.`,
+          { type: 'subscription_activated', tier: subscription.tier },
+        );
+
+        return res.json({ success: true, message: 'Subscription activated' });
+      }
+
       const payment = await prisma.payment.findUnique({
         where: { geniuspayRef: reference },
         include: { quote: { include: { project: true } } },
@@ -295,6 +341,21 @@ router.post('/webhooks/geniuspay', express.json(), async (req, res) => {
       res.json({ success: true, message: 'Payment processed' });
     } else if (event === 'payment.failed') {
       const reference = data.reference;
+
+      // Abonnement en attente : remettre à INACTIVE
+      const failedSub = await prisma.subscription.findFirst({
+        where: { transactionId: reference, status: 'PENDING_PAYMENT' },
+      });
+      if (failedSub) {
+        await prisma.subscription.update({
+          where: { id: failedSub.id },
+          data: { status: 'INACTIVE', transactionId: null },
+        });
+        // Nettoyer le promo en attente
+        await prisma.appConfig.deleteMany({ where: { key: `pending_promo_${reference}` } }).catch(() => null);
+        return res.json({ success: true, message: 'Subscription payment failure recorded' });
+      }
+
       const failedPayment = await prisma.payment.findUnique({ where: { geniuspayRef: reference } });
       if (failedPayment) {
         await prisma.payment.update({ where: { id: failedPayment.id }, data: { status: 'failed' } });

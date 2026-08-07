@@ -1,7 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const prisma = require('../config/db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, requireEmailVerified } = require('../middleware/auth');
 const { getActiveTier, getTierConfig } = require('./subscriptions');
 const { sendPushNotification } = require('../config/pushNotifications');
 const geniuspay = require('../utils/geniuspay');
@@ -20,7 +20,7 @@ const createProjectLimiter = rateLimit({
 });
 
 // POST /api/projects
-router.post('/', requireAuth, requireRole('CLIENT'), createProjectLimiter, async (req, res, next) => {
+router.post('/', requireAuth, requireRole('CLIENT'), requireEmailVerified, createProjectLimiter, async (req, res, next) => {
   try {
     const { title, description, tradeNeeded, budgetMin, budgetMax, city, latitude, longitude, photos } = req.body;
 

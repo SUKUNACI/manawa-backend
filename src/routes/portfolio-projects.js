@@ -38,7 +38,7 @@ router.get('/', async (req, res, next) => {
         const jwt = require('jsonwebtoken');
         const token = authHeader.replace('Bearer ', '');
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        userId = decoded.userId;
+        userId = decoded.id;
       } catch {}
     }
 

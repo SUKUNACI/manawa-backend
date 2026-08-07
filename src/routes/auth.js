@@ -150,6 +150,10 @@ router.post('/refresh', async (req, res, next) => {
       return res.status(401).json({ error: 'Refresh token invalide ou expiré' });
     }
 
+    if (stored.user.deletedAt) {
+      await prisma.refreshToken.delete({ where: { id: stored.id } });
+      return res.status(401).json({ error: 'Compte supprimé' });
+    }
     if (stored.user.suspended) {
       return res.status(403).json({ error: 'Compte suspendu' });
     }

@@ -236,6 +236,9 @@ router.patch('/:id/complete', requireAuth, requireRole('CLIENT'), async (req, re
       const pro = await prisma.professional.findUnique({ where: { id: acceptedQuote.professionalId }, select: { userId: true } });
       if (pro) sendPushNotification(pro.userId, 'Mission terminée !', `La mission "${project.title}" est officiellement terminée. Bravo !`, { type: 'mission_completed', projectId: project.id });
       sendPushNotification(project.clientId, 'Mission terminée !', `La mission "${project.title}" est terminée. Vous pouvez laisser un avis.`, { type: 'mission_completed', projectId: project.id });
+      // Recalcul badges (fire-and-forget) — peut débloquer FIRST_MISSION, TEN_MISSIONS, FIFTY_MISSIONS
+      const { computeBadges } = require('../utils/badges');
+      computeBadges(acceptedQuote.professionalId).catch(() => {});
     } else if (!bothConfirmed && acceptedQuote) {
       const pro = await prisma.professional.findUnique({ where: { id: acceptedQuote.professionalId }, select: { userId: true } });
       if (pro) sendPushNotification(pro.userId, 'Confirmation de fin demandée', `Le client a confirmé la fin de "${project.title}". Confirmez à votre tour.`, { type: 'confirm_completion', projectId: project.id });
@@ -268,6 +271,9 @@ router.patch('/:id/confirm-completion', requireAuth, requireRole('PROFESSIONAL')
       await prisma.professional.update({ where: { id: pro.id }, data: { completedMissionsCount: { increment: 1 } } });
       sendPushNotification(project.clientId, 'Mission terminée !', `La mission "${project.title}" est officiellement terminée. Vous pouvez laisser un avis.`, { type: 'mission_completed', projectId: project.id });
       sendPushNotification(pro.userId, 'Mission terminée !', `La mission "${project.title}" est terminée. Bravo !`, { type: 'mission_completed', projectId: project.id });
+      // Recalcul badges (fire-and-forget) — peut débloquer FIRST_MISSION, TEN_MISSIONS, FIFTY_MISSIONS
+      const { computeBadges } = require('../utils/badges');
+      computeBadges(pro.id).catch(() => {});
     } else {
       sendPushNotification(project.clientId, 'Confirmation de fin demandée', `Le professionnel a confirmé la fin de "${project.title}". Confirmez à votre tour.`, { type: 'confirm_completion', projectId: project.id });
     }

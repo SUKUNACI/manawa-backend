@@ -56,6 +56,7 @@ jest.mock('../src/config/db', () => ({
   companyMember: { findFirst: jest.fn(), findMany: jest.fn() },
   notification: { create: jest.fn() },
   pushToken: { findMany: jest.fn().mockResolvedValue([]) },
+  professionalBadge: { findMany: jest.fn().mockResolvedValue([]) },
 }));
 
 // Mock Cloudinary upload

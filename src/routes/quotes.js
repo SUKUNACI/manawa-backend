@@ -122,6 +122,10 @@ router.post('/', requireAuth, requireRole('PROFESSIONAL'), createQuoteLimiter, a
       sendPushNotification(projectData.clientId, 'Nouveau devis reçu', `Un professionnel a envoyé un devis de ${totalAmount.toLocaleString()} FCFA pour "${projectData.title}"`, { type: 'new_quote', projectId });
     }
 
+    // Recalcul badges (fire-and-forget) — peut débloquer FIRST_QUOTE
+    const { computeBadges } = require('../utils/badges');
+    computeBadges(pro.id).catch(() => {});
+
     res.status(201).json(quote);
   } catch (err) {
     next(err);

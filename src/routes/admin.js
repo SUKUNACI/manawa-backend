@@ -1443,6 +1443,10 @@ router.patch('/professionals/:id/verify', async (req, res, next) => {
       { type: 'identity_approved' }
     );
 
+    // Recalcul badges (fire-and-forget)
+    const { computeBadges } = require('../utils/badges');
+    computeBadges(req.params.id).catch(() => {});
+
     await writeAdminLog(req, 'PRO_VERIFY', 'Professional', req.params.id);
     res.json({ message: 'Identité vérifiée', professional: updated });
   } catch (err) {

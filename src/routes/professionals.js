@@ -5,6 +5,7 @@ const { verifyMagicBytes } = require('../config/upload');
 const { uploadBuffer } = require('../config/cloudinary');
 const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const { computeTrustScore, getTrustScoreBreakdown } = require('../utils/trustScore');
+const { BADGES } = require('../utils/badges');
 const { isPremiumActive, isOnTrial, getActiveTier, getTierConfig, PREMIUM_PRICE_FCFA } = require('./subscriptions');
 
 const router = express.Router();
@@ -548,7 +549,14 @@ router.get('/:id', optionalAuth, async (req, res, next) => {
     }
 
     const activeTier = getActiveTier(pro.subscription, pro);
-    res.json({ ...pro, portfolio, isFollowing, followerCount: pro.followers.length, followers: undefined, trustScore: computeTrustScore(pro, extras), trustScoreBreakdown: getTrustScoreBreakdown(pro, extras), isPremium: activeTier !== 'GRATUIT', tier: activeTier, isOnTrial: isOnTrial(pro), trialEndsAt: pro.trialEndsAt, subscription: undefined });
+
+    const badgeRows = await prisma.professionalBadge.findMany({
+      where: { professionalId: pro.id },
+      orderBy: { earnedAt: 'asc' },
+    });
+    const badges = badgeRows.map(b => ({ ...b, ...BADGES[b.badgeKey] })).filter(b => b.label);
+
+    res.json({ ...pro, portfolio, isFollowing, followerCount: pro.followers.length, followers: undefined, trustScore: computeTrustScore(pro, extras), trustScoreBreakdown: getTrustScoreBreakdown(pro, extras), isPremium: activeTier !== 'GRATUIT', tier: activeTier, isOnTrial: isOnTrial(pro), trialEndsAt: pro.trialEndsAt, subscription: undefined, badges });
   } catch (err) {
     next(err);
   }

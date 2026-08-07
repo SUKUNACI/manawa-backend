@@ -22,6 +22,10 @@ uploads/
 dist/
 build/
 
+# Backups DB locaux
+backups/
+backup_*.json
+
 # Logs
 *.log
 npm-debug.log*

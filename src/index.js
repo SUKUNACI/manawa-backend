@@ -37,6 +37,8 @@ const packageRoutes = require('./routes/packages');
 const searchRoutes = require('./routes/search');
 const badgeRoutes = require('./routes/badges');
 const referralRoutes = require('./routes/referrals');
+const analyticsRoutes = require('./routes/analytics');
+const videoCallRoutes = require('./routes/videoCalls');
 
 // Firebase initialization
 const { initializeFirebase, getMessaging } = require('./config/firebase-admin');
@@ -182,6 +184,8 @@ app.use('/api/packages', packageRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/badges', badgeRoutes);
 app.use('/api/referrals', referralRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/video-calls', videoCallRoutes);
 
 // Panel d'administration
 const prismaForIPGuard = require('./config/db');

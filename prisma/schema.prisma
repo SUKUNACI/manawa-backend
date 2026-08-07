@@ -58,6 +58,8 @@ model User {
   disputes              Dispute[]
   refreshTokens         RefreshToken[]
   clientPackageOrders   PackageOrder[]         @relation("ClientPackageOrders")
+  initiatedCalls        VideoCall[]            @relation("InitiatedCalls")
+  receivedCalls         VideoCall[]            @relation("ReceivedCalls")
 }
 
 model RefreshToken {
@@ -241,6 +243,7 @@ model Project {
   review                    Review?
   bookings                  Booking[]
   packageOrders             PackageOrder[]
+  videoCalls                VideoCall[]
 }
 
 model ProjectPhoto {
@@ -746,4 +749,25 @@ model Referral {
   @@unique([referredId]) // un user ne peut être parrainé qu'une fois
   @@index([referrerId])
   @@index([code])
+}
+
+model VideoCall {
+  id            String    @id @default(uuid())
+  roomName      String    @unique
+  roomUrl       String
+  initiatorId   String
+  participantId String
+  status        String    @default("PENDING") // PENDING | ACTIVE | ENDED | MISSED
+  projectId     String?
+  startedAt     DateTime?
+  endedAt       DateTime?
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+
+  initiator   User     @relation("InitiatedCalls", fields: [initiatorId], references: [id])
+  participant User     @relation("ReceivedCalls", fields: [participantId], references: [id])
+  project     Project? @relation(fields: [projectId], references: [id])
+
+  @@index([initiatorId])
+  @@index([participantId])
 }
